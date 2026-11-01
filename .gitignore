@@ -1,0 +1,57 @@
+# --- secrets / local env ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+
+# --- databases & runtime data ---
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+kiosk-agent/data/*
+!kiosk-agent/data/.gitkeep
+pgdata/
+postgres-data/
+
+# --- Java / Maven ---
+target/
+*.class
+*.log
+*.jar
+*.war
+!.mvn/wrapper/maven-wrapper.jar
+dependency-reduced-pom.xml
+hs_err_pid*
+
+# --- Node / frontend / mocks ---
+node_modules/
+dist/
+.vite/
+coverage/
+npm-debug.log*
+.npm/
+
+# --- IDE / OS ---
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+.classpath
+.project
+.settings/
+.DS_Store
+Thumbs.db
+
+# --- test outputs ---
+tests/**/results/
+tests/**/*.out.json
+.verify-logs/
+
+# --- personal Claude Code settings (project skills in .claude/skills ARE committed) ---
+.claude/settings.local.json

@@ -1,0 +1,14 @@
+{
+  "name": "mock-hr-payroll-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DEV-ONLY mock HR/Payroll receiver for the TMC reporting service (zero dependencies)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

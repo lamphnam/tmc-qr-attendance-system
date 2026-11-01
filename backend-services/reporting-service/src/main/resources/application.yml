@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: reporting-service
+  datasource:
+    # Container-to-container DNS name is `central-db`; `localhost` is only for running outside Compose.
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/tmc}
+    username: ${DB_USER:tmc_app}
+    password: ${DB_PASSWORD:dev-only-change-me}
+    hikari:
+      connection-timeout: 3000
+      # Do not abort startup when the DB is down; /actuator/health reports it instead.
+      initialization-fail-timeout: -1
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: 8080
+  shutdown: graceful
+
+tmc:
+  # Mock HR/Payroll in Compose is reached by its service DNS name, never by localhost across containers.
+  hr-api:
+    base-url: ${HR_API_BASE_URL:http://localhost:8091}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-components: always
+      show-details: ${HEALTH_SHOW_DETAILS:never}

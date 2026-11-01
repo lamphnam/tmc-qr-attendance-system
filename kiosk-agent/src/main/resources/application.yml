@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: kiosk-agent
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: 8080
+  shutdown: graceful
+
+kiosk:
+  id: ${KIOSK_ID:BD-K01}
+  factory-id: ${KIOSK_FACTORY_ID:BD}
+  # Gate used by the dev-only synthetic event when the request does not name one.
+  default-gate-id: ${KIOSK_DEFAULT_GATE_ID:BD-G01}
+  sqlite:
+    # Inside Compose this is on the `kiosk-data` named volume (/data). Outside Compose: ./data/kiosk.db
+    path: ${SQLITE_PATH:./data/kiosk.db}
+  central:
+    # Kiosk -> central goes through the gateway (docs/API-CONTRACTS.md). Container DNS name, not localhost.
+    base-url: ${CENTRAL_BASE_URL:http://localhost:8080}
+    # DEV-ONLY fixture path. Owners switch to /api/v1/attendance/sync once it is authenticated (D01/D04).
+    sync-path: ${CENTRAL_SYNC_PATH:/api/dev/attendance/sync}
+    # Offline simulation (D05): true stops ONLY kiosk -> central. The local turnstile keeps working.
+    disabled: ${CENTRAL_SYNC_DISABLED:false}
+    connect-timeout-ms: 1000
+    read-timeout-ms: 3000
+  turnstile:
+    base-url: ${TURNSTILE_BASE_URL:http://localhost:8090}
+    timeout-ms: 1500
+  sync:
+    enabled: ${KIOSK_SYNC_ENABLED:true}
+    interval-ms: ${KIOSK_SYNC_INTERVAL_MS:5000}
+    batch-size: 20
+    backoff-base-ms: 2000
+    backoff-max-ms: 60000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-components: always
+      show-details: ${HEALTH_SHOW_DETAILS:never}

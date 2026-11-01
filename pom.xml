@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Aggregator ONLY - it is deliberately NOT the parent of the services.
+  Every module declares spring-boot-starter-parent itself so that each Docker
+  image can build from its own directory, and so services stay independently
+  deployable (Service-based Architecture, no shared Java library).
+
+  Run everything:   mvn test            (needs JAVA_HOME -> JDK 21)
+  Run one module:   mvn -pl backend-services/attendance-processor test
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>vn.edu.hcmut.tmc</groupId>
+    <artifactId>tmc-qr-attendance-system</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>TMC QR Attendance - aggregator</name>
+
+    <modules>
+        <module>backend-services/user-qr-service</module>
+        <module>backend-services/gate-station-service</module>
+        <module>backend-services/attendance-processor</module>
+        <module>backend-services/reporting-service</module>
+        <module>kiosk-agent</module>
+    </modules>
+</project>

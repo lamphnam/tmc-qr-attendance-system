@@ -1,0 +1,193 @@
+# TMC QR Attendance - DEVELOPMENT stack on one machine.
+#
+# This SIMULATES edge + central on a single Docker host (docs/ARCHITECTURE.md "Deployment"). It is not evidence of a physical factory
+# deployment. Plain HTTP, no TLS/mTLS, no authentication, dummy credentials: do not expose it beyond localhost, which is
+# why every published port below is bound to 127.0.0.1.
+#
+#   docker compose up --build -d --wait      # build + start, returns when every healthcheck passes
+#   docker compose down                      # stop, KEEP data      (volumes survive)
+#   docker compose down -v                   # stop, DESTROY data   (central DB, kiosk SQLite, mock HR state)
+#
+# Values come from .env (optional - copy .env.example) and fall back to the same dummy defaults.
+
+name: tmc-qr-attendance
+
+x-java-env: &java-env
+  JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--Xms64m -Xmx192m}
+  # `dev` enables the unauthenticated /api/dev/** fixtures. Never use this profile outside a developer machine.
+  SPRING_PROFILES_ACTIVE: dev
+  HEALTH_SHOW_DETAILS: always
+
+x-db-env: &db-env
+  DB_URL: jdbc:postgresql://central-db:5432/${POSTGRES_DB:-tmc}
+  DB_USER: ${POSTGRES_USER:-tmc_app}
+  DB_PASSWORD: ${POSTGRES_PASSWORD:-dev-only-change-me}
+
+# /actuator/health is DOWN (HTTP 503) while the database is unreachable, so `healthy` really means "can serve".
+x-java-healthcheck: &java-healthcheck
+  test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/actuator/health"]
+  interval: 10s
+  timeout: 5s
+  retries: 12
+  start_period: 40s
+
+services:
+  # ------------------------------------------------------------------ central
+  central-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tmc}
+      POSTGRES_USER: ${POSTGRES_USER:-tmc_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev-only-change-me}
+    volumes:
+      - central-db-data:/var/lib/postgresql/data
+      # schema.sql then seed.sql run ONCE, on an empty volume only (decision D02).
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    ports:
+      # Host port 5433, not 5432: a locally installed PostgreSQL (or another project's container) very often owns 5432.
+      # Containers talk to central-db:5432 on the Compose network and never use this host port.
+      - "127.0.0.1:${DB_HOST_PORT:-5433}:5432"
+    healthcheck:
+      # -h 127.0.0.1 forces TCP: during first-time init Postgres runs a temporary server that listens on a unix
+      # socket only, and a socket-based pg_isready would report "ready" before schema.sql has been applied.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  user-qr-service:
+    build: ./backend-services/user-qr-service
+    environment:
+      <<: [*java-env, *db-env]
+      HR_API_BASE_URL: http://mock-hr-payroll-api:8091
+    depends_on:
+      central-db:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  gate-station-service:
+    build: ./backend-services/gate-station-service
+    environment:
+      <<: [*java-env, *db-env]
+    depends_on:
+      central-db:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  attendance-processor:
+    build: ./backend-services/attendance-processor
+    environment:
+      <<: [*java-env, *db-env]
+    depends_on:
+      central-db:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  reporting-service:
+    build: ./backend-services/reporting-service
+    environment:
+      <<: [*java-env, *db-env]
+      HR_API_BASE_URL: http://mock-hr-payroll-api:8091
+    depends_on:
+      central-db:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  # ------------------------------------------------------------------ edge
+  # The kiosk deliberately does NOT depend on central-db, the gateway or any central service:
+  # it must boot and keep scanning when the WAN is down (ADR-01).
+  kiosk-agent:
+    build: ./kiosk-agent
+    environment:
+      <<: *java-env
+      SQLITE_PATH: /data/kiosk.db
+      KIOSK_ID: ${KIOSK_ID:-BD-K01}
+      KIOSK_FACTORY_ID: ${KIOSK_FACTORY_ID:-BD}
+      # Kiosk -> central goes through the gateway, like any other client (docs/API-CONTRACTS.md).
+      CENTRAL_BASE_URL: http://nginx-gateway
+      # Offline simulation (D05): true stops ONLY kiosk -> central. The local turnstile keeps working.
+      CENTRAL_SYNC_DISABLED: ${CENTRAL_SYNC_DISABLED:-false}
+      TURNSTILE_BASE_URL: http://mock-turnstile-api:8090
+    volumes:
+      # Named volume (ext4 inside Docker's VM). A Windows/macOS bind mount can break SQLite WAL's shared memory file.
+      - kiosk-data:/data
+    ports:
+      - "127.0.0.1:${KIOSK_HOST_PORT:-8085}:8080"
+    depends_on:
+      mock-turnstile-api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck: *java-healthcheck
+
+  mock-turnstile-api:
+    build: ./mock-external-systems/mock-turnstile-api
+    ports:
+      - "127.0.0.1:${MOCK_TURNSTILE_HOST_PORT:-8090}:8090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+
+  # ------------------------------------------------------------------ external system mocks
+  mock-hr-payroll-api:
+    build: ./mock-external-systems/mock-hr-payroll-api
+    environment:
+      SIMULATE_HR_DOWN: ${SIMULATE_HR_DOWN:-0}
+    volumes:
+      - mock-hr-data:/data
+    ports:
+      - "127.0.0.1:${MOCK_HR_HOST_PORT:-8091}:8091"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8091/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+
+  # ------------------------------------------------------------------ web + gateway
+  web-frontend:
+    build: ./web-frontend
+    ports:
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-3000}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+
+  nginx-gateway:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx-gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "127.0.0.1:${GATEWAY_HOST_PORT:-8080}:80"
+    depends_on:
+      web-frontend:
+        condition: service_healthy
+      user-qr-service:
+        condition: service_healthy
+      gate-station-service:
+        condition: service_healthy
+      attendance-processor:
+        condition: service_healthy
+      reporting-service:
+        condition: service_healthy
+      kiosk-agent:
+        condition: service_healthy
+      mock-hr-payroll-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/gateway/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+
+volumes:
+  central-db-data:
+  kiosk-data:
+  mock-hr-data:

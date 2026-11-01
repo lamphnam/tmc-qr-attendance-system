@@ -1,0 +1,14 @@
+{
+  "name": "mock-turnstile-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DEV-ONLY mock turnstile controller for the TMC kiosk (zero dependencies)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

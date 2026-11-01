@@ -1,0 +1,14 @@
+# Normalise line endings: LF in the repo so shell scripts, SQL and Dockerfiles
+# keep working when bind-mounted into Linux containers from a Windows checkout.
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.sql  text eol=lf
+*.conf text eol=lf
+Dockerfile text eol=lf
+*.ps1  text eol=lf
+
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.jar  binary
