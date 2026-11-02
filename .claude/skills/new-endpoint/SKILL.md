@@ -13,6 +13,7 @@ Work through this in order; every step maps to a file that silently drifts if sk
    - `presentation`: controller = transport only; DTOs with validation; errors as `{code, message, correlationId}` via the service's `ErrorResponseDto` (copy, no shared library).
    - `application`: the use case and the transaction boundary.
    - `domain`: ports and rules, **no** Spring/`jakarta`/JDBC/HTTP types. `infrastructure`: the adapter. Constructor injection only.
+   - A new port or abstraction needs a technical reason (AGENTS.md "Pragmatic SOLID", `docs/SOLID-GUIDELINES.md` §1); a controller or use case with one implementation and no boundary to isolate stays a concrete class.
    - Example to copy: `attendance-processor` — `AttendanceController` (production route, 501) vs `DevAttendanceController` + `AttendanceIngestionService` + `PostgresAttendanceRepository` (real logic).
 3. **Not ready or not authenticated?** Answer `501 {"code":"NOT_IMPLEMENTED"}` using the service's existing stub pattern; never a fake success. A production route needs authentication (D04); anything unauthenticated is a dev fixture: `@Profile("dev")`, path `/api/dev/...`, flagged `dev_fixture`/`X-TMC-Dev-Only`.
 4. **Gateway.** The `/api/v1/<area>/` prefix must exist in `nginx-gateway/nginx.conf`; a new prefix needs a `location` using the variable `proxy_pass` pattern. Keep the catch-all JSON 404s for `/api/` and `/services/` (they stop a proxy loop).

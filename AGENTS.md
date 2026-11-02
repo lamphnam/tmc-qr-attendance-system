@@ -1,6 +1,6 @@
 # AGENTS.md — luật bắt buộc cho coding agent (và người)
 
-Nguồn duy nhất của các luật làm việc trong repo. Các file khác không lặp lại chúng: [CLAUDE.md](CLAUDE.md) (lệnh test đơn lẻ + sơ đồ code), [README.md](README.md) (chạy nhanh, cổng, test), [docs/README.md](docs/README.md) (bản đồ tài liệu).
+Nguồn duy nhất của các luật làm việc trong repo. Các file khác không lặp lại chúng: [CLAUDE.md](CLAUDE.md) (lệnh test đơn lẻ + sơ đồ code), [README.md](README.md) (chạy nhanh, cổng, test), [docs/README.md](docs/README.md) (bản đồ tài liệu), [docs/SOLID-GUIDELINES.md](docs/SOLID-GUIDELINES.md) (lý giải đầy đủ Pragmatic SOLID và bảng bằng chứng).
 
 ## Trước khi viết code
 1. Đọc [docs/STATUS.md](docs/STATUS.md): module bạn sửa là `READY`, `DEV_SLICE`, `SCAFFOLD` hay `MOCK`. Rồi đọc đúng tài liệu cho việc của bạn theo bảng "What to read for what" trong [docs/README.md](docs/README.md).
@@ -18,6 +18,20 @@ Nguồn duy nhất của các luật làm việc trong repo. Các file khác kh�
 8. **Không tuyên bố khi chưa đo** — chính sách và danh sách: [PROJECT §5](docs/PROJECT.md#5-claims-policy-canonical--other-docs-link-here); giới hạn phải nhắc đúng: [DECISIONS — Known limitations](docs/DECISIONS.md#known-limitations).
 9. **Git:** không `git init/add/commit/push`, không tạo repo, không sửa remote, không force-push thay người dùng; người dùng tự review rồi push. Không gọi API bên thứ ba hay GitHub khi chưa được yêu cầu.
 10. **Báo cáo trung thực:** chạy thật, ghi lệnh + exit code. Nếu Docker/Java/Node thiếu thì ghi đúng lệnh chưa chạy được; không tự ghi PASS. `Skipped` không phải `passed` (test Testcontainers bị skip khi không có Docker).
+
+## Pragmatic SOLID
+M2 chấm cả việc áp dụng SOLID trong code thật, nên SOLID là hướng thiết kế chứ không phải chỉ tiêu. Ví dụ sát TMC, anti-pattern, câu hỏi phản biện và bảng bằng chứng: [docs/SOLID-GUIDELINES.md](docs/SOLID-GUIDELINES.md).
+
+**Quy tắc chính.** Khi thiết kế, cài đặt hoặc refactor production code, cân nhắc SOLID ở những chỗ nó mang lại lợi ích cụ thể về bảo trì, mở rộng, kiểm thử, thay thế implementation hoặc tách trách nhiệm. Không thêm abstraction, interface, cây kế thừa, design pattern hay class chỉ để "thể hiện" SOLID. Chọn thiết kế đơn giản nhất vẫn đúng với yêu cầu hiện tại và chừa điểm mở rộng hợp lý. Số interface/class hay số nguyên tắc xuất hiện không phải thước đo chất lượng kiến trúc.
+
+1. **Khi nên cân nhắc:** một class ôm nhiều trách nhiệm có lý do đổi khác nhau; business logic gọi thẳng DB/HTTP/thiết bị; có nhiều implementation thật sự cần hoán đổi; nghiệp vụ mở rộng bằng strategy/policy/adapter; code khó unit test vì dính infrastructure; một thay đổi buộc sửa nhiều chỗ không liên quan. **Khi không cần:** trách nhiệm đã đơn giản và rõ; abstraction chỉ thêm một tầng trung gian; chưa có nhu cầu thay thế có cơ sở; refactor chỉ làm tăng số file.
+2. **Abstraction mới phải có lý do kỹ thuật nói được trong một câu:** giữ chi tiết dễ đổi (PostgreSQL, SQLite, HTTP, thiết bị) ra khỏi `domain`/`application`, hoặc có từ hai implementation, hoặc thay phần chậm/không tất định (mạng, đồng hồ) trong test. Không thì dùng class cụ thể. Hợp đồng của port (precondition, postcondition, lỗi, side effect) ghi trong Javadoc của port.
+3. **OCP và LSP bị hỏi sâu nhất.** Áp dụng OCP phải trả lời được: phần nào ổn định, điểm mở rộng ở đâu, thêm implementation mới phải sửa class nào, có thật sự khỏi sửa core không, lợi gì so với gọi trực tiếp. Với LSP, cùng `implements` không phải bằng chứng: kiểm tra hành vi thay thế theo hợp đồng; không trả thành công giả hay `UNSUPPORTED` tuỳ tiện; có từ hai implementation (hoặc một fake trung thực) thì viết contract test.
+4. **DIP không phải DI.** Constructor injection chưa đủ: port thuộc domain, implementation ở infrastructure, `*ArchitectureTest` giữ hướng phụ thuộc.
+5. **Không refactor code đang chạy chỉ để thêm nguyên tắc**, và không tạo class rỗng cho đủ tên trong design tree ([TRACEABILITY](docs/TRACEABILITY.md#java-class-map)).
+6. **Không tuyên bố đã áp dụng SOLID chỉ vì tên class, tên interface hay annotation.** Không chèn comment `// SOLID`, `// OCP`, `// LSP`; code rõ nghĩa cộng tài liệu kiến trúc riêng là đủ.
+7. **Xong task có thay đổi kiến trúc đáng kể** (port hoặc adapter mới, tách/gộp class lớn): nêu ngắn gọn nguyên tắc nào, ở file nào, vì sao, và giới hạn/chi phí (bảy câu hỏi ở [SOLID-GUIDELINES §3](docs/SOLID-GUIDELINES.md#3-making-it-defensible)). Task đơn giản thì không viết giải thích cho có.
+8. **Bảng bằng chứng** ([SOLID-GUIDELINES §5](docs/SOLID-GUIDELINES.md#5-solid-evidence)) chỉ sửa khi có implementation liên quan, bằng nhãn `DESIGNED`/`IMPLEMENTED`/`TESTED`/`LIMITATION` ([PROJECT §5](docs/PROJECT.md#5-claims-policy-canonical--other-docs-link-here)). Chỉ ghi `IMPLEMENTED` sau khi đã đọc code thật, `TESTED` sau khi đã chạy test.
 
 ## Khi xong việc
 Cập nhật cùng lúc ba nơi khi trạng thái một module đổi: [docs/STATUS.md](docs/STATUS.md), [docs/TRACEABILITY.md](docs/TRACEABILITY.md) và `web-frontend/src/catalog.ts` (nhãn trên dashboard). Thêm test tích hợp thật vào `tests/integration/` trước khi đổi nhãn. Kiểm tra bằng bộ lệnh ở [README §4](README.md#4-test).

@@ -35,7 +35,7 @@ Cross-cutting references (do not restate them in a PR): who depends on whom and 
 | P1 | Switch `CENTRAL_SYNC_PATH` to the authenticated route when Khôi opens it; add kiosk → central credentials (D04) | Khôi, Khoa |
 | P1 | Heartbeat to gate-station; receive manual-open commands over the agreed channel (D11) | Khôi |
 | P1 | Official T02: **20 unique events** (different employees/time steps), restart while offline, lost ack after a central commit; compare counts and ID sets on both sides (the slice only proves 1 event) | Nam (harness) |
-| P2 | `ZKTecoTurnstileAdapter` returning `UNSUPPORTED` (never fake a protocol); replace or adopt the mock turnstile contract (B18) | — |
+| P2 | `ZKTecoTurnstileAdapter` returning `UNSUPPORTED` (never fake a protocol; first define `UNSUPPORTED` in the port contract, see [SOLID-GUIDELINES](SOLID-GUIDELINES.md#liskov-substitution-lsp--high-priority)); replace or adopt the mock turnstile contract (B18) | — |
 
 ## 3. Khôi — `attendance-processor`, `gate-station-service`
 

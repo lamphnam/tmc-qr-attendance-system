@@ -59,7 +59,7 @@ Names the team proposed in its design trees (companion text files in the `NAM` D
 | `domain/port/IAttendanceLocalRepository`, `ITurnstileAdapter`, `IKioskSyncAPI` | done |
 | `infrastructure/persistence/SqliteConfig`, `SQLiteAttendanceRepository` | done (not imported by the domain) |
 | `infrastructure/turnstile/EthernetTurnstileAdapter` | done against the **mock** HTTP turnstile |
-| `infrastructure/turnstile/ZKTecoTurnstileAdapter` | **not created** — demonstrates OCP/LSP, but must return `UNSUPPORTED`; never fake a proprietary protocol |
+| `infrastructure/turnstile/ZKTecoTurnstileAdapter` | **not created** — would be a second implementation of the port, but an adapter that only returns `UNSUPPORTED` is not OCP/LSP evidence, and `UNSUPPORTED` must first be defined in the port contract ([SOLID-GUIDELINES](SOLID-GUIDELINES.md#liskov-substitution-lsp--high-priority)); never fake a proprietary protocol |
 | `infrastructure/sync/RestAttendanceSyncClient` | done (posts to the dev sync path, B04) |
 | *added by the bootstrap* | `QueueSyntheticEventUseCase`, `SyncPendingEventsUseCase`, `QueueQueryService`, `CentralSyncSwitch`, `SyncSettings`, `SyncRunReport`, `RetryBackoffPolicy`, `KioskIdentity`, `SqliteQueueHealthIndicator`, `DevQueueController`, `ApiExceptionHandler`, `config/` (composition root) |
 

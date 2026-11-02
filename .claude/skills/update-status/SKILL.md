@@ -14,6 +14,7 @@ A status label may only go **up** with evidence (a command that was run and its 
 Then:
 - `docs/TODO.md`: remove or reword the tasks that are now done; do not leave finished work listed.
 - If a design choice was made on the way, use the `record-decision` skill.
+- `docs/SOLID-GUIDELINES.md` §5 (SOLID evidence table): touch it only when the change adds or alters the code a row points at, never for a label change alone. `IMPLEMENTED` needs the code read, `TESTED` needs the test run.
 - `docs/TESTING.md` section C boxes are ticked only when the matching test exists and passed.
 - Verify: `node scripts/verify.mjs --only docs,frontend` (and the stages that exercise your change — see skill `verify-all`).
 

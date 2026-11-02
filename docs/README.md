@@ -17,6 +17,7 @@ Handoff documentation for **TMC QR Attendance & Access Control** (CO3017 Softwar
 | open a PR, know who owns a module | [OWNERSHIP](OWNERSHIP.md) |
 | face an open question or a limitation | [DECISIONS](DECISIONS.md) |
 | link code to requirements, find a planned class name | [TRACEABILITY](TRACEABILITY.md) |
+| add a port/abstraction, split or merge a class, prepare the SOLID defence | [SOLID-GUIDELINES](SOLID-GUIDELINES.md) |
 
 ## Document map — each fact lives in exactly one place
 
@@ -31,6 +32,7 @@ Handoff documentation for **TMC QR Attendance & Access Control** (CO3017 Softwar
 | [TESTING](TESTING.md) | test plan T01–T06, demo scenes, definition of done |
 | [DECISIONS](DECISIONS.md) | decision register D01–D16, bootstrap decisions B01–B20, **known limitations** |
 | [TRACEABILITY](TRACEABILITY.md) | FR/NFR/ADR ↔ class ↔ test with status, and the Java class map |
+| [SOLID-GUIDELINES](SOLID-GUIDELINES.md) | Pragmatic SOLID: when to apply it, per-principle guidance, anti-patterns, defence questions, the SOLID evidence table |
 | [STATUS](STATUS.md) | module status labels, per-module status, commands run and results, dev-only inventory |
 | [TODO](TODO.md) | remaining work per member |
 
