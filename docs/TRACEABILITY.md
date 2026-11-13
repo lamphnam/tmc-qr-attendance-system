@@ -12,7 +12,7 @@ The evidence column is filled only with things that exist and ran (2026-11-01). 
 | FR-1.2 / 1.3 / 1.4 | Dynamic QR, revocation, web UI | Khoa/Khiêm | TOTP generation, revoked QR | NOT_IMPLEMENTED | `UserQrController` routes answer 501 (`UserQrServiceApplicationTest`) |
 | FR-2.1 / 2.2 | Gate station, manual open, audit | Khôi/Khoa | guard role / manual gate | NOT_IMPLEMENTED | `GateStationController` routes answer 501 |
 | FR-3.1 | Kiosk + SQLite + Processor | Khánh/Khôi | scan → ack → idempotency | DEV_SLICE | queue + sync + turnstile only; `POST /api/local/scan` answers 501 (`KioskAgentApplicationTest`). See ADR-01 rows |
-| FR-3.2 | Reporting + UI | Nam/Khiêm | employee history authorization | NOT_IMPLEMENTED | — |
+| FR-3.2 | Reporting + UI | Nam/Khiêm | employee history authorization | NOT_IMPLEMENTED | Internal attendance history query core exists in attendance-processor (class map below); no history endpoint, authorization or UI. Reporting service remains unchanged |
 | FR-4.1 / 4.2 | Reporting service | Nam | filtered factory report & dashboard | NOT_IMPLEMENTED | `ReportingController` routes answer 501 |
 | FR-5.1 | JWT / RBAC | Khoa | per-role endpoint authorization | NOT_IMPLEMENTED | tables `roles`, `users`, `user_roles` only |
 | FR-5.2 | Configuration | Khoa/Khôi | reload / bounds | NOT_IMPLEMENTED | — |
@@ -25,7 +25,7 @@ The evidence column is filled only with things that exist and ran (2026-11-01). 
 | NFR-7 | Report query ≤ 30 s | Nam | report on a dataset | NOT_MEASURED | — |
 | NFR-8 | RBAC, tamper-evident audit | Khoa | app permission + checksum integrity | NOT_IMPLEMENTED | `audit_logs` table only |
 | ADR-01 | Offline + SQLite + direct sync | Khánh/Khôi | offline / restart / retry | DEV_SLICE | commit-before-open: `QueueSyntheticEventUseCaseTest.eventIsCommittedAsPendingBeforeTheGateCommandIsSent` · SYNCED only after ack: `SyncPendingEventsUseCaseTest` (6), `KioskAgentApplicationTest.scanWhileOfflineStaysPendingThenSyncsExactlyOnceAfterReconnect` · central idempotency: `AttendanceIdempotencyPostgresIntegrationTest` (6, real PostgreSQL, incl. 8-thread race), `slice.test.mjs` · offline switch (cuts only kiosk → central): `CentralSyncSwitch` |
-| ADR-02 | TOTP, anti-replay | Khoa/Khánh | replay / revocation / skew | NOT_IMPLEMENTED | `used_tokens`, `whitelist_cache` tables exist, unused |
+| ADR-02 | TOTP, anti-replay | Khoa/Khánh | replay / revocation / skew | NOT_IMPLEMENTED | `used_tokens` remains unused by production code. Whitelist domain and SQLite persistence without secret material exist; see the class map below. TOTP, secret protection and real scan integration are not implemented |
 | ADR-03 | Monthly HR export | Nam | retry + idempotency + failure notification | NOT_IMPLEMENTED | mock receiver only |
 | Layering | `presentation → application → domain ← infrastructure` | all | `mvn test` | READY | `*ArchitectureTest` in all 5 Java modules (skeleton services only have `presentation` so far) |
 
@@ -54,7 +54,9 @@ Names the team proposed in its design trees (companion text files in the `NAM` D
 | `application/usecase/ProcessQrScanUseCase` | **not created** — verify offline, persist the durable event **and** the used token atomically, then command the gate via `ITurnstileAdapter`. `QueueSyntheticEventUseCase` shows the commit-then-open ordering |
 | `application/usecase/SyncManagerScheduler` | done (trigger for `SyncPendingEventsUseCase`) |
 | `domain/model/LocalAttendanceEvent` | done |
-| `domain/model/WhitelistEmployee` | **not created** |
+| `domain/model/WhitelistEmployee`, `WhitelistSnapshot`, `WhitelistMetadata`, `WhitelistLookup`, `QrStatus` | implemented; immutable local whitelist models, redacted/defensively copied material, initialized vs empty snapshot; `WhitelistModelsTest` |
+| `domain/port/IWhitelistReader`, `IWhitelistSnapshotStore`; `domain/exception/WhitelistCacheException` | implemented; separate local read/update contracts, safe cache failure reasons |
+| `infrastructure/persistence/SQLiteWhitelistRepository` | partial implementation: existing DataSource, scope validation, atomic version check + replacement + metadata, consistent reads, empty/reopened snapshots. D08: only absent secret material; supplied material or existing secret BLOB returns UNAVAILABLE, never plaintext fallback. `SQLiteWhitelistRepositoryTest`: 31 passed on 2026-11-14 (JDK 23, release 21). Not a complete whitelist/QR feature; no HTTP sync or codec |
 | `domain/service/TotpValidatorDomainService` | **not created** — pure RFC 6238 HMAC-SHA256 with a `Clock` abstraction |
 | `domain/port/IAttendanceLocalRepository`, `ITurnstileAdapter`, `IKioskSyncAPI` | done |
 | `infrastructure/persistence/SqliteConfig`, `SQLiteAttendanceRepository` | done (not imported by the domain) |
@@ -76,6 +78,9 @@ Names the team proposed in its design trees (companion text files in the `NAM` D
 | `domain/service/IdempotencyChecker` | done (classifies a repeated id; the PostgreSQL unique key is the concurrency-safe guard) |
 | `domain/repository/IAttendanceRepository` | done (port in the domain) |
 | `infrastructure/persistence/PostgresAttendanceRepository` | done |
+| `domain/model/AttendanceHistoryQuery`, `AttendanceHistoryPage`; `domain/repository/IAttendanceHistoryQuery` | implemented internal read contract: employee + factory required, UTC millisecond [from, to), zero-based offset pages of 1..100 events, occurredAt/attendanceId ASC, fixtures excluded. Not an API/auth contract |
+| `application/service/AttendanceHistoryService` | implemented with constructor-injected read port; `AttendanceHistoryModelsTest` (21) and `AttendanceHistoryServiceTest` (4) passed on 2026-11-14, JDK 23 / release 21 |
+| `infrastructure/persistence/PostgresAttendanceHistoryQuery` | implemented parameterized JdbcTemplate SELECT, bounded page + hasNext, no write-repository changes. SQL NOT_TESTED: 8 AttendanceHistoryPostgresIntegrationTest cases skipped on 2026-11-14 (Docker unavailable). Application context test verifies real unreachable-DB failure propagation; no fake empty result |
 | *added by the bootstrap* | `DevAttendanceController`, `ApiExceptionHandler`, `IngestionResult`, `domain/exception/*`, `DomainBeansConfig` |
 
 ### user-qr-service (Khoa), gate-station-service (Khôi), reporting-service (Nam)

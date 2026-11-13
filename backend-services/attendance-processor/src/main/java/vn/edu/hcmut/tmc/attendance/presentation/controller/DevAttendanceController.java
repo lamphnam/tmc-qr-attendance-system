@@ -64,6 +64,11 @@ public class DevAttendanceController {
     public ResponseEntity<BatchSyncResponseDto> ingestBatch(@Valid @RequestBody BatchSyncRequestDto request) {
         List<IngestionResult> results = new ArrayList<>(request.events().size());
         for (AttendanceEventDto event : request.events()) {
+            if (event == null) {
+                // Reuse the missing-attendanceId representation rather than inventing an event id.
+                results.add(IngestionResult.rejected("null", "event must not be null"));
+                continue;
+            }
             try {
                 results.add(ingestionService.ingest(event.toDomain(request.kioskId(), true)));
             } catch (IllegalArgumentException invalid) {
