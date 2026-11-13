@@ -9,12 +9,12 @@ Recommend explicit tables and unique keys, with separate ownership and migration
 
 | Table | Important fields [DRAFT] | Purpose/owner |
 |---|---|---|
-| `employees` | `employee_id PK`, `full_name`, `department`, `factory_id`, `qr_status`, `secret_version`, protected `shared_secret`, `updated_at` | HR-sync and QR; Khoa |
+| `employees` | `employee_id VARCHAR(36) PK`, `full_name(120)`, `department(64) NOT NULL`, `factory_id(32) FK`, `role(32)`, `shared_secret(128) NOT NULL`, `qr_status ACTIVE/REVOKED`, positive `secret_version`, `updated_at` | QR; Khoa; plaintext **synthetic dev secrets only** (B22), protection at rest remains D08 |
 | `factories` | `factory_id PK`, `name` | shared reference |
 | `gates` | `gate_id PK`, `factory_id`, `direction`, `status`, `kiosk_id` | Khôi |
 | `kiosks` | `kiosk_id PK`, `factory_id`, `last_heartbeat`, `status` | Khôi |
 | `attendance_events` | `attendance_id UUID PK`, `employee_id`, `factory_id`, `gate_id`, `direction`, `occurred_at`, `scan_result`, `recorded_at` | Khôi; unique ID idempotency |
-| `audit_logs` | `audit_id`, `actor_id`, `action`, `resource`, `occurred_at`, `previous_hash`, `checksum` | Khoa; append-only/tamper evidence |
+| `audit_logs` | `log_id VARCHAR(36) PK`, unique `audit_sequence BIGSERIAL`, `timestamp`, `actor_id`, `actor_role`, `action_type`, `target_resource`, nullable `payload_summary`, `status`, `previous_hash`, `checksum` | Khoa; append-only application writer and hash chain (B22) |
 | `hr_export_batches` | `batch_uuid PK`, `period`, `status`, `attempt_count`, `last_attempt_at`, `next_retry_at`, `last_error` | Nam; durable retry |
 | `hr_export_batch_items` | `batch_uuid`, `attendance_id`, unique pair | Nam; dedupe/traceability |
 | `users/roles/...` | subject, role/permission mappings | Khoa; six roles |
@@ -52,8 +52,28 @@ M1: **all scanned attempts including REJECTED should be logged**, while the team
 - Combine append-only API, database privileges (no UPDATE/DELETE for app role), hash chaining and external root/checkpoint protection when possible; document demo limitation.
 - Never log `shared_secret`, bearer token, QR TOTP, passwords or personally identifying content beyond necessary audit metadata.
 
+Implemented dev chain (B22): within PostgreSQL's default READ_COMMITTED transaction, append takes
+a transaction-scoped advisory lock `730202601`,
+reads the last checksum by `audit_sequence`, calculates the next hash, then inserts. The lock is held
+until the employee change and audit insert commit/roll back together. It also serializes the empty-chain case.
+The genesis previous hash is 64 zeroes. Sequence gaps from rolled-back inserts are valid.
+
+Canonical checksum encoding `TMC-AUDIT-V1`: concatenate, in this order, the marker, log ID,
+UTC `Instant.toString()` timestamp truncated to milliseconds, actor ID, actor role, action type,
+target resource, payload summary, status, previous hash. Each field is a signed 4-byte big-endian
+UTF-8 **byte** length followed by its bytes; null is length -1 with no bytes. Hash the resulting bytes
+with SHA-256 and encode as 64 lowercase hex characters. Length prefixes prevent delimiter ambiguity.
+`audit_sequence` orders the chain and is not part of the checksum.
+
+`IAuditLogRepository` only appends; `IAuditLogQuery` is a separate read capability. SQL revokes
+UPDATE/DELETE/TRUNCATE from PUBLIC, but the current shared **owner/superuser** account can still
+rewrite data and checksums or bypass the writer lock. This is tamper detection, not full NFR-8
+immutability; restricted application roles and an external checkpoint remain required (B14).
+
 ## Seed data [DRAFT]
 
-- 2 factories `BD`, `LA`; representative kiosk/gate IDs, 2–4 fictional employees; six demo roles if auth implemented.
+- 2 factories `BD`, `LA`; original kiosk/gate IDs and legacy `EMP001`–`EMP004` preserved.
+  Added `EMP-001`–`EMP-005` (9 total synthetic employees); `EMP-005` and legacy `EMP004` are REVOKED.
+  Six role catalog entries, no users/passwords. Public dummy QR secrets are explicitly dev-only.
 - All fixtures must be synthetic and clearly demo-only. No persistent real credential in repo.
 - Use independent deterministic test IDs and reset instructions so demo is reproducible.

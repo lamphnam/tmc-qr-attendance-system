@@ -22,3 +22,12 @@ Scope warning: events are **synthetic** (no QR, no TOTP, no authentication). Pas
 NFR-1/2/3/6, ADR-02 or ADR-03. Owners add their real tests next to this file.
 
 Environment overrides: `GATEWAY_URL`, `MOCK_TURNSTILE_URL`, `MOCK_HR_URL`, `POSTGRES_USER`, `POSTGRES_DB`.
+
+## User/QR lifecycle
+
+`node --test tests/integration/user-qr.test.mjs` exercises the running dev stack, creates a unique
+synthetic employee, checks persisted version/status/audit rows, verifies a scoped whitelist including
+revocations and recomputes the returned audit chain independently with Node SHA-256.
+It requires the new canonical schema on an empty dev volume and `KIOSK_API_KEY` matching the server
+(Compose dummy default works). It never resets existing data. The scenario leaves its synthetic
+employee and audit events in the dev database. `scripts/verify.mjs` runs this alongside the slice tests.

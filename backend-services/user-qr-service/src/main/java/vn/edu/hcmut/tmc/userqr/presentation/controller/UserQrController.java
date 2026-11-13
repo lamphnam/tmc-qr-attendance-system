@@ -1,40 +1,64 @@
 package vn.edu.hcmut.tmc.userqr.presentation.controller;
 
-import org.springframework.http.HttpStatus;
+import java.util.List;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.*;
+import vn.edu.hcmut.tmc.userqr.application.service.UserQrApplicationService;
+import vn.edu.hcmut.tmc.userqr.presentation.dto.*;
 
-import vn.edu.hcmut.tmc.userqr.presentation.dto.ErrorResponseDto;
-
-/**
- * Contract skeleton for the routes listed in docs/API-CONTRACTS.md ([DRAFT] until the owners sign off).
- *
- * <p>STATUS: NOT_IMPLEMENTED (owner: Khoa). Every route answers 501 with the shared error shape
- * instead of a fake success, so other members can wire against the path through the gateway and
- * get an honest answer. Replace a stub with a real use case behind {@code application/} and keep
- * the domain free of framework types (see AGENTS.md).
- */
+/** Synthetic-data demo only; the requested v1 paths are disabled without the dev profile (B21). */
 @RestController
+@Profile("dev")
+@Validated
 public class UserQrController {
+    private final UserQrApplicationService service;
 
-    /** FR-1.3, ADR-02: dynamic QR payload (never the shared secret) */
-    @GetMapping("/api/v1/qr/generate")
-    public ResponseEntity<ErrorResponseDto> generateQr(
-            @RequestHeader(value = "X-Request-Id", required = false) String requestId) {
-        return notImplemented("GET /api/v1/qr/generate", requestId);
+    public UserQrController(UserQrApplicationService service) { this.service = service; }
+
+    @GetMapping("/api/v1/qr/{employeeId}")
+    public ResponseEntity<QrResponseDto> qr(
+            @PathVariable @Pattern(regexp = "[A-Za-z0-9_-]{1,36}") String employeeId) {
+        return demo(QrResponseDto.from(service.issueQr(employeeId)));
     }
 
-    /** FR-1.2, ADR-02: kiosk-authenticated whitelist snapshot */
-    @GetMapping("/api/v1/kiosk/whitelist")
-    public ResponseEntity<ErrorResponseDto> kioskWhitelist(
-            @RequestHeader(value = "X-Request-Id", required = false) String requestId) {
-        return notImplemented("GET /api/v1/kiosk/whitelist", requestId);
+    @PostMapping("/api/v1/qr/{employeeId}/rotate")
+    public ResponseEntity<QrResponseDto> rotate(
+            @PathVariable @Pattern(regexp = "[A-Za-z0-9_-]{1,36}") String employeeId,
+            @Valid @RequestBody(required = false) QrActionRequestDto body) {
+        QrActionRequestDto action = body == null ? QrActionRequestDto.empty() : body;
+        return demo(QrResponseDto.from(service.rotateSecret(employeeId, action.actorId(), action.actorRole(), action.reason())));
     }
 
-    private static ResponseEntity<ErrorResponseDto> notImplemented(String route, String requestId) {
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(ErrorResponseDto.of(
-                "NOT_IMPLEMENTED", route + " is not implemented yet (owner: Khoa)", requestId));
+    @PostMapping("/api/v1/qr/{employeeId}/revoke")
+    public ResponseEntity<QrStatusResponseDto> revoke(
+            @PathVariable @Pattern(regexp = "[A-Za-z0-9_-]{1,36}") String employeeId,
+            @Valid @RequestBody(required = false) QrActionRequestDto body) {
+        QrActionRequestDto action = body == null ? QrActionRequestDto.empty() : body;
+        return demo(QrStatusResponseDto.from(service.revokeQr(employeeId, action.actorId(), action.actorRole(), action.reason())));
+    }
+
+    @PostMapping("/api/v1/qr/{employeeId}/activate")
+    public ResponseEntity<QrResponseDto> activate(
+            @PathVariable @Pattern(regexp = "[A-Za-z0-9_-]{1,36}") String employeeId,
+            @Valid @RequestBody(required = false) QrActionRequestDto body) {
+        QrActionRequestDto action = body == null ? QrActionRequestDto.empty() : body;
+        return demo(QrResponseDto.from(service.activateQr(employeeId, action.actorId(), action.actorRole(), action.reason())));
+    }
+
+    @GetMapping("/api/v1/qr/audit-logs")
+    public ResponseEntity<List<AuditLogResponseDto>> auditLogs(
+            @RequestParam(defaultValue = "100") @Min(1) @Max(200) int limit) {
+        return demo(service.auditLogs(limit).stream().map(AuditLogResponseDto::from).toList());
+    }
+
+    static <T> ResponseEntity<T> demo(T body) {
+        return ResponseEntity.ok().header("Cache-Control", "no-store").header("Pragma", "no-cache")
+                .header("X-TMC-Dev-Only", "true").body(body);
     }
 }
