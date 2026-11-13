@@ -17,7 +17,7 @@ Status values: **OPEN** nothing chosen · **PROPOSED** the scaffold chose someth
 | D05 | P0 | Offline simulation | Stopping central ≠ WAN isolation; toggle sync or the network boundary without cutting the local turnstile | **PROPOSED** B08 |
 | D06 | P1 | Rejected-scan persistence | M1 says rejected scans are logged; define schema, retention and which events sync | **OPEN** (B11 keeps both options) |
 | D07 | P1 | Multi-kiosk anti-replay | Local `(employeeId, step)` only stops same-kiosk replay; no global anti-replay while offline | **OPEN** (limitation) |
-| D08 | P1 | Whitelist / secret protection and revocation | Secret at rest, key rotation, scoped whitelist; offline revoke is delayed until sync | **OPEN** (B12) |
+| D08 | P1 | Whitelist / secret protection and revocation | Kiosk at-rest protection implemented; key lifecycle, Central encoding and offline revocation remain open | **OPEN** (B12; [kiosk implementation](#d08-kiosk-secret-protection-2026-11-14)) |
 | D09 | P1 | HR mock failure code | Examples say 500 and 503; handle any retryable 5xx, never one literal code | **PROPOSED** B09 |
 | D10 | P1 | HR export period and stable batch id | Define previous calendar month, duplicate manual trigger, storage and dedupe semantics | **OPEN** |
 | D11 | P1 | Remote manual-gate command | M1 wants a dedicated authenticated channel but gives no protocol; do not fake end-to-end | **OPEN** |
@@ -44,7 +44,7 @@ Added 2026-11-01 by the scaffold. Nothing here changes [BASELINE-M1] (4 services
 | B09 | D09 | Mock HR failure injection accepts **any** 4xx/5xx (`SIMULATE_HR_DOWN=503` or `PUT /mock/hr/control/failure`); nothing is stored while failing; the receiver upserts by `attendanceId` and reports `duplicateBatch` | Do not rely on one literal code | Reporting treats every 5xx/timeout as retryable | Nam |
 | B10 | D16 | Frontend = React 19 + TypeScript + Vite 7 | ARCHITECTURE default | - | Khiêm |
 | B11 | D06 | `local_attendance_events.scan_result` allows `ALLOWED` and `REJECTED` (universal-schema option) but **nothing writes REJECTED yet**; D06 stays open | Keeps both options open | - | Khánh + Khôi |
-| B12 | D07, D08 | `whitelist_cache` / `used_tokens` exist in the SQLite schema but are **unused**; `employees.shared_secret_enc` is NULL; no secret material exists in the repo | Do not invent crypto | - | Khoa + Khánh |
+| B12 | D07, D08 | Bootstrap snapshot: `whitelist_cache` / `used_tokens` were unused and `employees.shared_secret_enc` NULL. Kiosk persistence has since been implemented; see [D08 update](#d08-kiosk-secret-protection-2026-11-14). Central secret handling and anti-replay are unchanged | Preserve the historical bootstrap boundary | - | Khoa + Khánh |
 | B13 | - | DATA-MODEL columns added: `attendance_events.source_kiosk_id` and `.dev_fixture` (marks rows written by dev fixtures so reports can exclude them). No FKs from `attendance_events` to employees/gates (immutable edge facts, possibly produced with a stale whitelist) | Traceability of the dev slice | Khôi may add reference validation at ingestion | Khôi |
 | B14 | D04 | All central services share one **dummy** DB credential from `.env`; no least-privilege roles (e.g. an audit table the app can INSERT but not UPDATE/DELETE, NFR-8) | Scaffold only | Khoa must add restricted roles before claiming audit tamper evidence | Khoa |
 | B15 | D04 | `SPRING_PROFILES_ACTIVE=dev` enables the unauthenticated `/api/dev/**` fixtures; Compose turns it on, every host port binds `127.0.0.1`, and the gateway forwards `/api/dev/attendance/` and `/api/dev/kiosk/` | Makes the slice demonstrable | Remove both gateway locations and the profile for any non-developer environment | Khoa |
@@ -67,7 +67,7 @@ Added 2026-11-01 by the scaffold. Nothing here changes [BASELINE-M1] (4 services
 
 Canonical list. Quote these instead of re-deriving them, and never contradict them in the report (policy: [PROJECT §5](PROJECT.md#5-claims-policy-canonical--other-docs-link-here)).
 
-- **Security is a design intention, not a feature.** Dev traffic is plain HTTP with no authentication, a dummy shared DB credential and no MFA. TLS 1.3, mTLS, encryption at rest and MFA (NFR-4) are not implemented.
+- **Security is incomplete.** Dev traffic is plain HTTP with no authentication, a dummy shared DB credential and no MFA. Kiosk whitelist material has local AES-256-GCM protection; TLS 1.3, mTLS, Central secret protection and MFA remain unimplemented. This does not satisfy NFR-4 as a whole.
 - **Data durability.** SQLite WAL + `synchronous=FULL` protects against a process crash or restart, not against a physical disk failure, and depends on the filesystem. "Zero data loss" must not be claimed.
 - **Offline revocation is not instant.** A kiosk keeps a stale whitelist until its next sync. A compromised kiosk exposes the secrets of the employees assigned to it.
 - **Anti-replay is per kiosk.** `(employee_id, matched_time_step)` cannot stop reuse across kiosks while disconnected.
@@ -79,3 +79,9 @@ Canonical list. Quote these instead of re-deriving them, and never contradict th
 ## Change governance
 
 Log open decisions in this file with date, owner, chosen answer and the effect on FR/NFR/ADR, API and diagrams. Keep [BASELINE-M1] intact unless a documented ADR supersedes it with the group's approval.
+
+## D08 kiosk secret protection (2026-11-14)
+
+Implemented at the assigned user's explicit request: AES-256-GCM in kiosk Infrastructure, with an external 32-byte Base64 key (`KIOSK_WHITELIST_KEY_BASE64`), a fresh random 96-bit nonce per encryption, a 128-bit tag, a versioned local envelope and authenticated row/snapshot context. The existing SQLite repository encrypts/decrypts without changing schema, HTTP contracts, domain ports or attendance transactions. Missing keys fail secret operations; malformed key configuration, wrong keys and altered envelopes expose only fixed safe domain errors. There is no fallback to plaintext or automatic reset.
+
+Scope: the kiosk part of D08 / NFR-4 and the whitelist prerequisite for ADR-02. It does not complete FR-3.1, TOTP, anti-replay or NFR-4. Key custody/provisioning, key rotation/migration, Central secret encoding and revocation policy remain for Khoa/Khánh and the team. The format version supports explicit future codecs; no keyring, key ID or legacy migration is claimed. Preserve the key externally for database recovery. Whole-database integrity/rollback detection and protection from a compromised kiosk process are outside this change. Detailed storage/error behavior: [kiosk README](../kiosk-agent/README.md#local-whitelist-key-d08).

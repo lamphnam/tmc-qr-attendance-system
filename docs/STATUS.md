@@ -36,7 +36,7 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 | `gate-station-service` | Khôi | **SCAFFOLD** | `/services/gate-station/health` | boots + real health; `POST /api/v1/gates`, `GET …/status`, `POST …/manual-open` answer **501** | registration, heartbeat, manual open + audit |
 | `attendance-processor` | Khôi | **DEV_SLICE** | `/services/attendance/health` | real idempotent ingestion: single event + batch, per-event ack after commit, SAME vs CONFLICT, 503 when the DB is down, safe under 8 threads on one id. Only via `/api/dev/attendance/*`; `/api/v1/attendance/*` answer **501** | authenticated production routes, rejected scans (D06), reference validation |
 | `reporting-service` | Nam | **SCAFFOLD** | `/services/reporting/health` | boots + real health; 3 report/dashboard/hr-export routes answer **501**; `tmc.hr-api.base-url` configured | reports, dashboard, HR export scheduler/retry |
-| `kiosk-agent` | Khánh | **DEV_SLICE** | `/services/kiosk/health`; host `8085` | SQLite WAL + `synchronous=FULL`; PENDING committed before the turnstile call; sync by per-id ack with backoff; FAILED only on a per-event rejection; the offline switch cuts only kiosk → central; health reads the real SQLite file. `POST /api/local/scan` answers **501** | QR scan, TOTP, whitelist cache, anti-replay (`used_tokens` table unused), rejected scans, heartbeat, manual open, auth to central |
+| `kiosk-agent` | Khánh | **DEV_SLICE** | `/services/kiosk/health`; host `8085` | SQLite WAL + `synchronous=FULL`; PENDING committed before the turnstile call; sync by per-id ack with backoff; FAILED only on a per-event rejection; the offline switch cuts only kiosk → central; health reads the real SQLite file. Whitelist domain, atomic SQLite snapshots and local AES-256-GCM secret protection implemented (D08 update below). `POST /api/local/scan` answers **501** | QR scan, TOTP, HTTP whitelist sync, key lifecycle, anti-replay (`used_tokens` table unused), rejected scans, heartbeat, manual open, auth to central |
 | `mock-turnstile-api` | Khánh | **MOCK** | `/health`; host `8090` | `POST /gates/{id}/open`, command counting, failure injection; always `physicalOpenConfirmed:false` | contract is invented by the bootstrap (B18) |
 | `mock-hr-payroll-api` | Nam | **MOCK** | `/health`; host `8091` | idempotent upsert by `attendanceId`, `duplicateBatch`, 4xx/5xx injection, state survives a container restart, `GET /mock/hr/employees` | HR contract is DRAFT (D09/D10) |
 | `web-frontend` | Khiêm | **SCAFFOLD** | `/` (gateway 8080 or host 3000) | *Status* page (real health every 10 s), *Dev slice* page, five placeholders labelled **Not implemented**; typecheck + build + 17 tests incl. SSR render of every route | login, QR, simulator, every business UI. **Never opened in a real browser** |
@@ -83,3 +83,19 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 ## 5. Dev-only / mock items (must not reach a "production" build)
 
 `/api/dev/attendance/*` and `/api/dev/kiosk/*` (profile `dev`, unauthenticated) · the two matching `location` blocks in `nginx-gateway/nginx.conf` · `QueueSyntheticEventUseCase` (synthetic events, no QR/TOTP) · column `attendance_events.dev_fixture` · `mock-turnstile-api`, `mock-hr-payroll-api` · password `dev-only-change-me` · `HEALTH_SHOW_DETAILS=always` · `kiosk.central.sync-path=/api/dev/attendance/sync`.
+
+## 6. Kiểm chứng D08 tại kiosk (2026-11-14)
+
+Nhãn module vẫn là **DEV_SLICE**; không thay đổi nhãn dashboard. Phần bảo vệ material trong SQLite đã được triển khai theo [D08](DECISIONS.md#d08-kiosk-secret-protection-2026-11-14), không đồng nghĩa scan/TOTP hoặc HTTP whitelist sync đã hoàn thành. Cách cấp khóa và giới hạn khôi phục/rotation: [kiosk README](../kiosk-agent/README.md#local-whitelist-key-d08).
+
+Môi trường thực chạy: JDK 23.0.1, compiler release 21, Maven 3.9.16. Khóa trong test được sinh ngẫu nhiên tạm thời; không dùng khóa production.
+
+| Lệnh | Exit code | Kết quả |
+|---|---|---|
+| `mvn -B -ntp -pl kiosk-agent -Dtest=WhitelistSecretCodecTest,WhitelistSecretConfigTest,SQLiteWhitelistRepositoryTest test` | 0 | 74 PASS, 0 FAIL/ERROR/SKIP: codec 27, configuration 3, SQLite 44 |
+| `mvn -B -ntp -pl kiosk-agent test` | 0 | 138 PASS, 0 FAIL/ERROR/SKIP; gồm 3 Kiosk ArchUnit tests và regression queue/sync |
+| `mvn -B -ntp -Dtest=*ArchitectureTest test` | 0 | 11 PASS, 0 FAIL/ERROR/SKIP trong 5 module; 3 Kiosk tests trùng tập trên, không cộng thành 149 test khác nhau |
+| `node scripts/check-docs.mjs` | 0 | Các link tài liệu hợp lệ |
+| `git diff --check` | 0 | Không lỗi whitespace |
+
+Test thực dùng AES-GCM/JCE và SQLite file: round-trip/reopen, nonce mới, sai/thiếu khóa, sửa envelope/ngữ cảnh, rollback khi lỗi mã hóa hoặc transaction, đọc nhất quán khi writer commit, giữ nguyên attendance queue/used_tokens/metadata khác. Không chạy lại PostgreSQL integration trong lượt D08 này; các module backend không đổi. Cảnh báo khởi tạo bean trong test khóa không hợp lệ là nhánh lỗi chủ động kiểm tra, chỉ có thông báo cố định an toàn.

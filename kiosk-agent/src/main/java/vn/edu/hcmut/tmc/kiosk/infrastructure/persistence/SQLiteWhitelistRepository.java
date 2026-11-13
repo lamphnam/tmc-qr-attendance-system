@@ -1,15 +1,20 @@
 package vn.edu.hcmut.tmc.kiosk.infrastructure.persistence;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,10 +35,11 @@ import vn.edu.hcmut.tmc.kiosk.domain.model.WhitelistMetadata;
 import vn.edu.hcmut.tmc.kiosk.domain.model.WhitelistSnapshot;
 import vn.edu.hcmut.tmc.kiosk.domain.port.IWhitelistReader;
 import vn.edu.hcmut.tmc.kiosk.domain.port.IWhitelistSnapshotStore;
+import vn.edu.hcmut.tmc.kiosk.infrastructure.security.WhitelistSecretCodec;
 
 /**
- * Uses the existing kiosk DataSource and schema. D08 is open: only absent secret material can be persisted/read.
- * Supplied material or an existing non-NULL secret BLOB fails closed with UNAVAILABLE; no codec is fabricated.
+ * Uses the existing kiosk DataSource and schema. Non-null material is protected by the injected AES-GCM codec;
+ * missing keys or failed authentication never become cache misses or plaintext persistence.
  * Full snapshot validation on reads detects orphaned/mixed/corrupt rows, at the cost of scanning the whitelist.
  */
 @Repository
@@ -52,14 +58,13 @@ public class SQLiteWhitelistRepository implements IWhitelistReader, IWhitelistSn
                            'whitelist.cachedAt', 'whitelist.employeeCount')
             """;
     private static final String SELECT_EMPLOYEES = """
-            SELECT employee_id, qr_status, secret_version, cache_version, cached_at,
-                   shared_secret_enc IS NOT NULL AS has_secret
+            SELECT employee_id, qr_status, secret_version, cache_version, cached_at, shared_secret_enc
               FROM whitelist_cache
             """;
     private static final String INSERT_EMPLOYEE = """
             INSERT INTO whitelist_cache
                 (employee_id, qr_status, secret_version, shared_secret_enc, cache_version, cached_at)
-            VALUES (?, ?, ?, NULL, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """;
     private static final String UPSERT_METADATA = """
             INSERT INTO kiosk_metadata (key, value) VALUES (?, ?)
@@ -69,12 +74,14 @@ public class SQLiteWhitelistRepository implements IWhitelistReader, IWhitelistSn
     private final DataSource dataSource;
     private final String kioskId;
     private final String factoryId;
+    private final WhitelistSecretCodec secretCodec;
 
-    public SQLiteWhitelistRepository(DataSource dataSource, KioskIdentity identity) {
+    public SQLiteWhitelistRepository(DataSource dataSource, KioskIdentity identity, WhitelistSecretCodec secretCodec) {
         this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
         Objects.requireNonNull(identity, "identity");
         this.kioskId = requireId(identity.kioskId(), "kioskId");
         this.factoryId = requireId(identity.factoryId(), "factoryId");
+        this.secretCodec = Objects.requireNonNull(secretCodec, "secretCodec");
     }
 
     @Override
@@ -107,11 +114,6 @@ public class SQLiteWhitelistRepository implements IWhitelistReader, IWhitelistSn
             Optional<WhitelistSnapshot> current = readSnapshot(connection);
             if (current.isPresent() && current.orElseThrow().metadata().version() >= snapshot.metadata().version()) {
                 return false;
-            }
-            for (WhitelistEmployee employee : snapshot.employees()) {
-                if (employee.secretMaterial() != null) {
-                    throw new WhitelistCacheException(Reason.UNAVAILABLE);
-                }
             }
             execute(connection, "DELETE FROM whitelist_cache");
             insertEmployees(connection, snapshot);
@@ -148,13 +150,22 @@ public class SQLiteWhitelistRepository implements IWhitelistReader, IWhitelistSn
                             || !parseInstant(rows.getString("cached_at")).equals(metadata.cachedAt())) {
                         throw new WhitelistCacheException(Reason.INVALID_CACHE);
                     }
-                    if (rows.getBoolean("has_secret")) {
-                        throw new WhitelistCacheException(Reason.UNAVAILABLE);
+                    String employeeId = rows.getString("employee_id");
+                    String statusValue = rows.getString("qr_status");
+                    QrStatus status = statusValue == null ? null : QrStatus.valueOf(statusValue);
+                    int secretVersion = Integer.parseInt(rows.getString("secret_version"));
+                    // Validate row fields before building authenticated context; malformed rows are safe cache errors.
+                    new WhitelistEmployee(employeeId, status, secretVersion, null);
+                    byte[] envelope = rows.getBytes("shared_secret_enc");
+                    byte[] material = envelope == null ? null
+                            : secretCodec.decrypt(envelope, associatedData(metadata, employeeId, status, secretVersion));
+                    try {
+                        employees.add(new WhitelistEmployee(employeeId, status, secretVersion, material));
+                    } finally {
+                        if (material != null) {
+                            Arrays.fill(material, (byte) 0);
+                        }
                     }
-                    String status = rows.getString("qr_status");
-                    employees.add(new WhitelistEmployee(rows.getString("employee_id"),
-                            status == null ? null : QrStatus.valueOf(status),
-                            Integer.parseInt(rows.getString("secret_version")), null));
                 }
             }
             return metadata == null ? Optional.empty() : Optional.of(new WhitelistSnapshot(metadata, employees));
@@ -164,20 +175,45 @@ public class SQLiteWhitelistRepository implements IWhitelistReader, IWhitelistSn
         }
     }
 
-    private static void insertEmployees(Connection connection, WhitelistSnapshot snapshot) throws SQLException {
+    private void insertEmployees(Connection connection, WhitelistSnapshot snapshot) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(INSERT_EMPLOYEE)) {
             for (WhitelistEmployee employee : snapshot.employees()) {
                 statement.setString(1, employee.employeeId());
                 statement.setString(2, employee.qrStatus().name());
                 statement.setInt(3, employee.secretVersion());
-                statement.setLong(4, snapshot.metadata().version());
-                statement.setString(5, TIMESTAMP.format(snapshot.metadata().cachedAt()));
+                byte[] material = employee.secretMaterial();
+                try {
+                    if (material == null) {
+                        statement.setNull(4, Types.BLOB);
+                    } else {
+                        statement.setBytes(4, secretCodec.encrypt(material, associatedData(snapshot.metadata(),
+                                employee.employeeId(), employee.qrStatus(), employee.secretVersion())));
+                    }
+                } finally {
+                    if (material != null) {
+                        Arrays.fill(material, (byte) 0);
+                    }
+                }
+                statement.setLong(5, snapshot.metadata().version());
+                statement.setString(6, TIMESTAMP.format(snapshot.metadata().cachedAt()));
                 statement.addBatch();
             }
             if (!snapshot.employees().isEmpty()) {
                 statement.executeBatch();
             }
         }
+    }
+
+    private static byte[] associatedData(WhitelistMetadata metadata, String employeeId, QrStatus status, int secretVersion) {
+        ByteArrayOutputStream context = new ByteArrayOutputStream();
+        for (String field : List.of(metadata.kioskId(), metadata.factoryId(), employeeId, status.name(),
+                Integer.toString(secretVersion), Long.toString(metadata.version()),
+                TIMESTAMP.format(metadata.cachedAt()), Integer.toString(metadata.employeeCount()))) {
+            byte[] value = field.getBytes(StandardCharsets.UTF_8);
+            context.writeBytes(ByteBuffer.allocate(Integer.BYTES).putInt(value.length).array());
+            context.writeBytes(value);
+        }
+        return context.toByteArray();
     }
 
     private static void writeMetadata(Connection connection, WhitelistMetadata metadata) throws SQLException {

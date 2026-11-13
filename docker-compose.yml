@@ -104,6 +104,7 @@ services:
       SQLITE_PATH: /data/kiosk.db
       KIOSK_ID: ${KIOSK_ID:-BD-K01}
       KIOSK_FACTORY_ID: ${KIOSK_FACTORY_ID:-BD}
+      KIOSK_WHITELIST_KEY_BASE64: ${KIOSK_WHITELIST_KEY_BASE64:-}
       # Kiosk -> central goes through the gateway, like any other client (docs/API-CONTRACTS.md).
       CENTRAL_BASE_URL: http://nginx-gateway
       # Offline simulation (D05): true stops ONLY kiosk -> central. The local turnstile keeps working.

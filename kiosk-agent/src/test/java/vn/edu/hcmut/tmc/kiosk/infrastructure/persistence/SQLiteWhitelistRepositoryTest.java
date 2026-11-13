@@ -7,11 +7,14 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -45,6 +48,7 @@ import vn.edu.hcmut.tmc.kiosk.domain.model.WhitelistEmployee;
 import vn.edu.hcmut.tmc.kiosk.domain.model.WhitelistLookup;
 import vn.edu.hcmut.tmc.kiosk.domain.model.WhitelistMetadata;
 import vn.edu.hcmut.tmc.kiosk.domain.model.WhitelistSnapshot;
+import vn.edu.hcmut.tmc.kiosk.infrastructure.security.WhitelistSecretCodec;
 
 /** Real SQLite file throughout; JDBC decorators only coordinate races or inject a failure at a precise boundary. */
 class SQLiteWhitelistRepositoryTest {
@@ -59,13 +63,15 @@ class SQLiteWhitelistRepositoryTest {
     private DataSource dataSource;
     private JdbcTemplate jdbc;
     private SQLiteWhitelistRepository repository;
+    private WhitelistSecretCodec codec;
 
     @BeforeEach
     void open() {
         file = dir.resolve("kiosk.db");
         dataSource = SqliteConfig.createDataSource(file);
         jdbc = new JdbcTemplate(dataSource);
-        repository = new SQLiteWhitelistRepository(dataSource, IDENTITY);
+        codec = WhitelistSecretCodec.fromBase64Key(null);
+        repository = new SQLiteWhitelistRepository(dataSource, IDENTITY, codec);
     }
 
     private static WhitelistEmployee employee(String id, QrStatus status) {
@@ -191,7 +197,7 @@ class SQLiteWhitelistRepositoryTest {
     void refusesCacheBelongingToAnotherConfiguredKioskInsteadOfRescopingIt() {
         repository.replaceIfNewer(snapshot(1, employee("EMP001", QrStatus.ACTIVE)));
         var before = metadataRows();
-        SQLiteWhitelistRepository otherKiosk = new SQLiteWhitelistRepository(dataSource, new KioskIdentity("OTHER", "BD", "GATE"));
+        SQLiteWhitelistRepository otherKiosk = new SQLiteWhitelistRepository(dataSource, new KioskIdentity("OTHER", "BD", "GATE"), codec);
 
         assertCacheFailure(otherKiosk::inspect, Reason.INVALID_CACHE);
         assertCacheFailure(() -> otherKiosk.lookup("EMP001"), Reason.INVALID_CACHE);
@@ -251,7 +257,7 @@ class SQLiteWhitelistRepositoryTest {
     }
 
     @Test
-    void rejectsMaterialBeforeWritingAndNeverSilentlyDiscardsIt() {
+    void missingKeyRollsBackReplacementAndNeverSilentlyDiscardsMaterial() {
         WhitelistSnapshot withMaterial = snapshot(2, new WhitelistEmployee("EMP001", QrStatus.ACTIVE, 1, new byte[] {9, 8, 7}));
         assertCacheFailure(() -> repository.replaceIfNewer(withMaterial), Reason.UNAVAILABLE);
         assertThat(repository.inspect()).isEmpty();
@@ -266,7 +272,7 @@ class SQLiteWhitelistRepositoryTest {
     }
 
     @Test
-    void refusesExistingOpaqueBlobsUntilARealCodecIsAvailableWithoutReadingOrReplacingThem() {
+    void missingKeyRefusesExistingBlobsWithoutReadingOrReplacingThem() {
         repository.replaceIfNewer(snapshot(1, employee("EMP001", QrStatus.ACTIVE)));
         byte[] opaqueFixture = {0, 11, 22, 33};
         jdbc.update("UPDATE whitelist_cache SET shared_secret_enc = ?", opaqueFixture);
@@ -294,7 +300,7 @@ class SQLiteWhitelistRepositoryTest {
             }
         });
 
-        assertCacheFailure(() -> new SQLiteWhitelistRepository(failing, IDENTITY)
+        assertCacheFailure(() -> new SQLiteWhitelistRepository(failing, IDENTITY, codec)
                 .replaceIfNewer(snapshot(2, employee("NEW", QrStatus.DISABLED))), Reason.UNAVAILABLE);
 
         assertThat(employeeRows()).isEqualTo(employeesBefore);
@@ -309,7 +315,7 @@ class SQLiteWhitelistRepositoryTest {
         WhitelistSnapshot saved = empty ? snapshot(2) : snapshot(2, employee("EMP001", QrStatus.DISABLED));
         repository.replaceIfNewer(saved);
 
-        SQLiteWhitelistRepository reopened = new SQLiteWhitelistRepository(SqliteConfig.createDataSource(file), IDENTITY);
+        SQLiteWhitelistRepository reopened = new SQLiteWhitelistRepository(SqliteConfig.createDataSource(file), IDENTITY, codec);
 
         assertThat(reopened.inspect()).contains(saved.metadata());
         assertThat(reopened.lookup("EMP001").isInitialized()).isTrue();
@@ -318,7 +324,8 @@ class SQLiteWhitelistRepositoryTest {
 
     @Test
     void readerKeepsTheOldEmployeeAndMetadataWhenWriterCommitsBetweenItsSelects() throws Exception {
-        WhitelistSnapshot old = snapshot(1, employee("EMP001", QrStatus.ACTIVE));
+        enableProtection();
+        WhitelistSnapshot old = snapshot(1, protectedEmployee("EMP001"));
         repository.replaceIfNewer(old);
         CountDownLatch metadataRead = new CountDownLatch(1);
         CountDownLatch resumeReader = new CountDownLatch(1);
@@ -327,12 +334,12 @@ class SQLiteWhitelistRepositoryTest {
                 metadataRead.countDown();
                 await(resumeReader);
             }
-        }), IDENTITY);
+        }), IDENTITY, codec);
         ExecutorService pool = Executors.newSingleThreadExecutor();
         try {
             var result = pool.submit(() -> reader.lookup("EMP001"));
             assertThat(metadataRead.await(10, TimeUnit.SECONDS)).isTrue();
-            repository.replaceIfNewer(snapshot(2, employee("EMP001", QrStatus.REVOKED)));
+            repository.replaceIfNewer(snapshot(2, new WhitelistEmployee("EMP001", QrStatus.REVOKED, 3, new byte[] {5, 4, 3})));
             resumeReader.countDown();
 
             assertThat(result.get(15, TimeUnit.SECONDS)).isEqualTo(WhitelistLookup.found(old.metadata(), old.employees().getFirst()));
@@ -354,7 +361,7 @@ class SQLiteWhitelistRepositoryTest {
                 readyToCommit.countDown();
                 await(allowCommit);
             }
-        }), IDENTITY);
+        }), IDENTITY, codec);
         ExecutorService pool = Executors.newSingleThreadExecutor();
         try {
             var write = pool.submit(() -> writer.replaceIfNewer(snapshot(2, employee("NEW", QrStatus.ACTIVE))));
@@ -383,12 +390,12 @@ class SQLiteWhitelistRepositoryTest {
                 newerReady.countDown();
                 await(allowNewerCommit);
             }
-        }), IDENTITY);
+        }), IDENTITY, codec);
         SQLiteWhitelistRepository olderWriter = new SQLiteWhitelistRepository(intercepted(sql -> {
             if (sql.equals("BEGIN IMMEDIATE")) {
                 olderStarted.countDown();
             }
-        }), IDENTITY);
+        }), IDENTITY, codec);
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
             var newer = pool.submit(() -> newerWriter.replaceIfNewer(snapshot(3, employee("NEW", QrStatus.ACTIVE))));
@@ -410,6 +417,7 @@ class SQLiteWhitelistRepositoryTest {
 
     @Test
     void leavesAttendanceAntiReplayAndUnrelatedMetadataUntouched() {
+        enableProtection();
         SQLiteAttendanceRepository attendance = new SQLiteAttendanceRepository(jdbc);
         UUID eventId = UUID.randomUUID();
         attendance.insertPending(LocalAttendanceEvent.newPending(eventId, "EMP001", "BD", "BD-G01", Direction.IN,
@@ -419,13 +427,142 @@ class SQLiteWhitelistRepositoryTest {
         var attendanceBefore = jdbc.queryForList("SELECT * FROM local_attendance_events");
         var tokensBefore = jdbc.queryForList("SELECT * FROM used_tokens");
 
-        repository.replaceIfNewer(snapshot(1, employee("EMP001", QrStatus.ACTIVE)));
+        repository.replaceIfNewer(snapshot(1, protectedEmployee("EMP001")));
         repository.replaceIfNewer(snapshot(2));
 
         assertThat(jdbc.queryForList("SELECT * FROM local_attendance_events")).isEqualTo(attendanceBefore);
         assertThat(jdbc.queryForList("SELECT * FROM used_tokens")).isEqualTo(tokensBefore);
         assertThat(metadataRows()).containsEntry("clock_health", "healthy").containsEntry("whitelist.futureField", "keep");
         assertThat(attendance.findById(eventId)).isPresent();
+    }
+
+    private static String temporaryKey() {
+        byte[] key = new byte[32];
+        new SecureRandom().nextBytes(key);
+        try {
+            return Base64.getEncoder().encodeToString(key);
+        } finally {
+            Arrays.fill(key, (byte) 0);
+        }
+    }
+
+    private String enableProtection() {
+        String key = temporaryKey();
+        codec = WhitelistSecretCodec.fromBase64Key(key);
+        repository = new SQLiteWhitelistRepository(dataSource, IDENTITY, codec);
+        return key;
+    }
+
+    private static WhitelistEmployee protectedEmployee(String id) {
+        return new WhitelistEmployee(id, QrStatus.ACTIVE, 2, new byte[] {9, 8, 7, 6});
+    }
+
+    private byte[] storedEnvelope() {
+        return jdbc.queryForObject("SELECT shared_secret_enc FROM whitelist_cache WHERE employee_id = 'EMP001'", byte[].class);
+    }
+
+    @Test
+    void protectsMaterialAtRestAndRestoresItWithTheExternalKeyAfterReopen() {
+        String key = enableProtection();
+        WhitelistEmployee employee = protectedEmployee("EMP001");
+        WhitelistSnapshot saved = snapshot(1, employee, employee("NO-MATERIAL", QrStatus.DISABLED));
+        assertThat(repository.replaceIfNewer(saved)).isTrue();
+        assertThat(Arrays.equals(storedEnvelope(), employee.secretMaterial())).isFalse();
+        assertThat(jdbc.queryForObject("SELECT shared_secret_enc FROM whitelist_cache WHERE employee_id = 'NO-MATERIAL'", byte[].class)).isNull();
+
+        SQLiteWhitelistRepository reopened = new SQLiteWhitelistRepository(SqliteConfig.createDataSource(file), IDENTITY,
+                WhitelistSecretCodec.fromBase64Key(key));
+        assertThat(reopened.lookup("EMP001")).isEqualTo(WhitelistLookup.found(saved.metadata(), employee));
+        byte[] firstEnvelope = storedEnvelope();
+        assertThat(reopened.replaceIfNewer(snapshot(2, employee))).isTrue();
+        assertThat(Arrays.equals(Arrays.copyOfRange(firstEnvelope, 5, 17), Arrays.copyOfRange(storedEnvelope(), 5, 17))).isFalse();
+        assertThat(reopened.replaceIfNewer(snapshot(1, employee))).isFalse();
+        assertThat(reopened.lookup("EMP001").employee()).contains(employee);
+        assertThat(reopened.replaceIfNewer(snapshot(3))).isTrue();
+        assertThat(reopened.lookup("EMP001").isInitialized()).isTrue();
+        assertThat(reopened.lookup("EMP001").employee()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void missingOrWrongKeyIsNeverACacheMissAndCannotOverwriteEncryptedSnapshot(boolean missing) {
+        enableProtection();
+        repository.replaceIfNewer(snapshot(1, protectedEmployee("EMP001")));
+        byte[] before = storedEnvelope();
+        var metadataBefore = metadataRows();
+        SQLiteWhitelistRepository unavailable = new SQLiteWhitelistRepository(SqliteConfig.createDataSource(file), IDENTITY,
+                WhitelistSecretCodec.fromBase64Key(missing ? null : temporaryKey()));
+        Reason reason = missing ? Reason.UNAVAILABLE : Reason.INVALID_CACHE;
+
+        assertCacheFailure(unavailable::inspect, reason);
+        assertCacheFailure(() -> unavailable.lookup("UNKNOWN"), reason);
+        assertCacheFailure(() -> unavailable.replaceIfNewer(snapshot(2)), reason);
+        assertThat(Arrays.equals(before, storedEnvelope())).isTrue();
+        assertThat(metadataRows()).isEqualTo(metadataBefore);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ciphertext", "format-version", "employee", "status", "secret-version", "snapshot-version", "timestamp"})
+    void detectsTamperedEnvelopeOrAuthenticatedRowContextInsteadOfReturningAMiss(String target) {
+        enableProtection();
+        repository.replaceIfNewer(snapshot(1, protectedEmployee("EMP001")));
+        switch (target) {
+            case "ciphertext", "format-version" -> {
+                byte[] envelope = storedEnvelope();
+                envelope[target.equals("ciphertext") ? envelope.length - 1 : 4] ^= 1;
+                jdbc.update("UPDATE whitelist_cache SET shared_secret_enc = ?", envelope);
+            }
+            case "employee" -> jdbc.update("UPDATE whitelist_cache SET employee_id = 'OTHER'");
+            case "status" -> jdbc.update("UPDATE whitelist_cache SET qr_status = 'REVOKED'");
+            case "secret-version" -> jdbc.update("UPDATE whitelist_cache SET secret_version = 3");
+            case "snapshot-version" -> {
+                jdbc.update("UPDATE whitelist_cache SET cache_version = 2");
+                jdbc.update("UPDATE kiosk_metadata SET value = '2' WHERE key = 'whitelist.version'");
+            }
+            case "timestamp" -> {
+                jdbc.update("UPDATE whitelist_cache SET cached_at = ?", T0.toString());
+                jdbc.update("UPDATE kiosk_metadata SET value = ? WHERE key = 'whitelist.cachedAt'", T0.toString());
+            }
+            default -> throw new AssertionError("unknown test case");
+        }
+        var before = metadataRows();
+        assertCacheFailure(repository::inspect, Reason.INVALID_CACHE);
+        assertCacheFailure(() -> repository.lookup("UNKNOWN"), Reason.INVALID_CACHE);
+        assertCacheFailure(() -> repository.replaceIfNewer(snapshot(3)), Reason.INVALID_CACHE);
+        assertThat(metadataRows()).isEqualTo(before);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"encryption", "metadata", "commit"})
+    void snapshotIsUnchangedWhenEncryptionOrTransactionFails(String failurePoint) {
+        enableProtection();
+        WhitelistEmployee employee = protectedEmployee("EMP001");
+        repository.replaceIfNewer(snapshot(1, employee));
+        byte[] before = storedEnvelope();
+        var metadataBefore = metadataRows();
+        DataSource failing = intercepted(sql -> {
+            if ((failurePoint.equals("commit") && sql.equals("COMMIT"))
+                    || (failurePoint.equals("metadata") && sql.startsWith("INSERT INTO kiosk_metadata"))) {
+                throw new SQLException("synthetic diagnostic must not escape");
+            }
+        });
+        WhitelistSecretCodec writerCodec = failurePoint.equals("encryption") ? WhitelistSecretCodec.fromBase64Key(null) : codec;
+        // Start without material to reach encryption (rather than fail while decrypting the old snapshot).
+        if (failurePoint.equals("encryption")) {
+            repository.replaceIfNewer(snapshot(2, employee("OLD", QrStatus.ACTIVE)));
+            before = null;
+            metadataBefore = metadataRows();
+        }
+        SQLiteWhitelistRepository writer = new SQLiteWhitelistRepository(failing, IDENTITY, writerCodec);
+        assertCacheFailure(() -> writer.replaceIfNewer(snapshot(3, protectedEmployee("NEW"))), Reason.UNAVAILABLE);
+        assertThat(metadataRows()).isEqualTo(metadataBefore);
+        if (before == null) {
+            assertThat(repository.lookup("OLD").employee()).isPresent();
+            assertThat(repository.lookup("NEW").employee()).isEmpty();
+        } else {
+            assertThat(Arrays.equals(before, storedEnvelope())).isTrue();
+            assertThat(repository.lookup("EMP001").employee()).contains(employee);
+        }
     }
 
     private DataSource intercepted(SqlHook before) {
