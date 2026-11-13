@@ -116,6 +116,26 @@ Response must acknowledge **per event** due to mixed success/failure [BASELINE-M
 - Mock HR `POST /mock/hr/attendance-batches` [DRAFT] with batch UUID and attendanceIds; implement receiver-side upsert and failure flag `SIMULATE_HR_DOWN` (team notes disagree HTTP 500 vs 503: both transient; test both).
 - Scheduled job @ day 1 01:00 / retry until 06:00 / alert / 12:00 reconciliation deadline from M1. Manual trigger cannot accidentally duplicate real scheduled batch.
 
+## 8. Demo main-flow routes [PROPOSAL Khiêm → Khoa / Khôi / Khánh, not agreed]
+
+Called by `web-frontend` `/demo` (`src/api/endpoints.ts`). Until built they answer 404/405 and the page says so; nothing on the page invents a success.
+
+| Route | Owner | Proposed shape |
+|---|---|---|
+| `GET /api/v1/qr/{empId}` | Khoa | same body as §1 (`qrPayload`, `expiresAt`, `periodSeconds`); the bare §1 `qrPayload` is also accepted. Revoked: `409 {"code":"QR_REVOKED"}`. The page draws `qrPayload` as a QR image and never shows the TOTP digits |
+| `POST /api/v1/qr/{empId}/rotate` | Khoa | `{}` → 200; new `secret_version`, new secret, old code invalid at kiosks after their next whitelist refresh |
+| `POST /api/v1/qr/{empId}/revoke` | Khoa | `{"reason":"…"}` → 200; `qr_status = REVOKED`; audit log entry |
+| `GET /api/v1/attendance/events?limit=20` | Khôi | `{"events":[ §4 event … ]}` newest first. Until it exists the page looks up each queued id with the dev route `GET /api/dev/attendance/events/{id}` |
+| `POST /api/dev/kiosk/whitelist/sync` | Khôi | runs `SyncWhitelistUseCase` once; 200 |
+| `POST /api/local/scan` response `reason` | Khánh | on `REJECTED`: `EXPIRED`, `INVALID_TOTP`, `REPLAYED`, `REVOKED`, `UNKNOWN_EMPLOYEE` |
+
+**Security:** the three QR routes are unauthenticated by request of the M2 brief ("demo"). Anyone who knows an
+employee id could obtain that employee's current code, which defeats ADR-02. Before any non-demo use they must
+move behind `@Profile("dev")` (as `/api/dev/**`) or require the employee's JWT like `/generate`. Keep the literal
+`GET /api/v1/qr/generate` mapping: `scripts/smoke.sh` expects it to answer 501.
+
+Not recorded in [DECISIONS](DECISIONS.md) while it is a proposal; once the owners agree, record it with the `record-decision` skill.
+
 ## API docs deliverable
 
 Each owner eventually publishes OpenAPI JSON/YAML (or Actuator + Swagger). Until then this Markdown is the contract; keep an OpenAPI skeleton only if it is complete enough to validate. Unimplemented routes answer 501, never a dummy success.

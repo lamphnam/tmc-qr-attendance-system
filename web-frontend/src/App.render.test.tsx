@@ -31,6 +31,27 @@ describe('every route renders without throwing', () => {
     expect(html).toContain('not proof that a gate opened');
   });
 
+  it('the main-flow demo is a page of its own: three columns, one h1, no scaffold topbar or nav', () => {
+    const html = render('/demo');
+    expect(html.match(/<h1\b/g)).toHaveLength(1);
+    for (const heading of ['Nhân viên: mã QR động', 'Kiosk BD-K01 tại cổng', 'Trung tâm: PostgreSQL']) expect(html).toContain(heading);
+    expect(html).toContain('Đang lấy mã…');
+    expect(html).not.toContain('Development scaffold');
+    expect(html).not.toContain('class="topbar"');
+    expect(html).not.toContain('Kiosk simulator');
+    expect(html.match(/<main\b/g)).toHaveLength(1);
+    expect(html).toContain('<main class="demo-page">');
+  });
+
+  it('every other page keeps the scaffold shell, which links to the demo', () => {
+    for (const path of ['/', '/dev/slice', '/nope']) {
+      const html = render(path);
+      expect(html, path).toContain('class="topbar"');
+      expect(html, path).toContain('href="/demo"');
+      expect(html, path).not.toContain('tmc-demo');
+    }
+  });
+
   it('unknown paths do not crash', () => {
     expect(render('/nope')).toContain('Unknown page');
   });

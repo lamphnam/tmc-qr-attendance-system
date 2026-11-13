@@ -71,7 +71,7 @@ Checked boxes are verified on 2026-11-01 (commands and exit codes in [STATUS](ST
 - [x] The four services build and start independently with a health endpoint; `kiosk-agent` builds/starts and its SQLite file persists on a volume, with the table created and read.
 - [x] `mock-turnstile-api` and `mock-hr-payroll-api` answer **real HTTP**.
 - [x] Nginx routes to every domain API and the frontend with correct hostnames inside Compose.
-- [x] The frontend builds, loads and reads a real health endpoint, with placeholders clearly labelled *(rendering in a real browser is `NOT_TESTED`)*.
+- [x] The frontend builds, loads and reads a real health endpoint, with placeholders clearly labelled *(in a real browser only `/demo` was exercised, 2026-11-14 — [STATUS](STATUS.md) row 20; the other pages are `NOT_TESTED` there)*.
 - [x] PostgreSQL schema boots on a clean volume; fixtures are synthetic.
 - [x] `.env`, secrets, `*.db`, `target/`, `node_modules/` are not tracked.
 - [x] `docker compose config` passes, `up --build` works and services are healthy; the smoke script exits 0 only when every required endpoint passes.

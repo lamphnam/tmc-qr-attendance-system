@@ -1,6 +1,6 @@
 # STATUS — what exists, what was verified
 
-Snapshot of **2026-11-01** right after the bootstrap. Every result below comes from a command that was actually run on the bootstrap machine; what was not run is `NOT_TESTED`. Re-run the commands on your machine before trusting this. Requirement-level status is in [TRACEABILITY](TRACEABILITY.md); remaining work in [TODO](TODO.md); product limitations in [DECISIONS](DECISIONS.md#known-limitations).
+Snapshot of **2026-11-01** right after the bootstrap; the `web-frontend` row and commands 16–20 were updated on **2026-11-14**. Every result below comes from a command that was actually run on the bootstrap machine; what was not run is `NOT_TESTED`. Re-run the commands on your machine before trusting this. Requirement-level status is in [TRACEABILITY](TRACEABILITY.md); remaining work in [TODO](TODO.md); product limitations in [DECISIONS](DECISIONS.md#known-limitations).
 
 ## Status labels
 
@@ -39,7 +39,7 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 | `kiosk-agent` | Khánh | **DEV_SLICE** | `/services/kiosk/health`; host `8085` | SQLite WAL + `synchronous=FULL`; PENDING committed before the turnstile call; sync by per-id ack with backoff; FAILED only on a per-event rejection; the offline switch cuts only kiosk → central; health reads the real SQLite file. `POST /api/local/scan` answers **501** | QR scan, TOTP, whitelist cache, anti-replay (`used_tokens` table unused), rejected scans, heartbeat, manual open, auth to central |
 | `mock-turnstile-api` | Khánh | **MOCK** | `/health`; host `8090` | `POST /gates/{id}/open`, command counting, failure injection; always `physicalOpenConfirmed:false` | contract is invented by the bootstrap (B18) |
 | `mock-hr-payroll-api` | Nam | **MOCK** | `/health`; host `8091` | idempotent upsert by `attendanceId`, `duplicateBatch`, 4xx/5xx injection, state survives a container restart, `GET /mock/hr/employees` | HR contract is DRAFT (D09/D10) |
-| `web-frontend` | Khiêm | **SCAFFOLD** | `/` (gateway 8080 or host 3000) | *Status* page (real health every 10 s), *Dev slice* page, five placeholders labelled **Not implemented**; typecheck + build + 17 tests incl. SSR render of every route | login, QR, simulator, every business UI. **Never opened in a real browser** |
+| `web-frontend` | Khiêm | **DEV_SLICE** | `/` (gateway 8080 or host 3000); `/demo` | *Status* page (real health every 10 s), *Dev slice* page, five placeholders labelled **Not implemented**. **`/demo`** (2026-11-14): one standalone page with three columns — employee QR (drawn as a QR image), kiosk (scan, offline switch, sync, SQLite queue) and central (PostgreSQL rows, resend proving no duplicate). Columns 2–3 work against the real stack through `/api/dev/kiosk/*` and `/api/dev/attendance/*`; the QR, rotate/revoke, central list and whitelist-sync routes are proposals ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed)) and the page shows their 404/405/501 as such. 118 Vitest tests; opened in Chrome (1440/1366/1280/390 px) | login, real QR (needs Khoa's route), real scan (`/api/local/scan` is 501), Guard/HR/Admin pages, dashboard with business data |
 | `tests/integration` | Nam | **READY** (dev slice) | see README §4 | 8 tests asserting PostgreSQL rows, SQLite queue state and turnstile commands | tests for the real features (owners add) |
 | `tests/load` | Nam | **NOT_IMPLEMENTED** | — | README + `health-baseline.js` (**NOT_TESTED**, k6 not installed) | NFR-1 / NFR-7 |
 | `scripts/smoke.sh`, `smoke.ps1` | Nam | **READY** | — | 29 checks each; non-zero exit on any failure | — |
@@ -64,6 +64,11 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 | 13 | `git add -A` preview (git-dir kept outside the repo; **no `.git` created**) | 0 | 180 files would be tracked; no `.env`, `*.db`, `target/`, `node_modules/`, `dist/`, `*.jar`; secret scan found only `dev-only-change-me` |
 | 14 | `make help` / `config` / `smoke` / `check-java` | 0 / 0 / 0 / **2** on JDK 17, 0 on JDK 21 | the guard works both ways |
 | 15 | `node scripts/verify.mjs --down` (after the docs consolidation of the same day; shell `JAVA_HOME` was JDK 17, the script found JDK 21 itself) | **0** | all 8 stages PASS: java 76 tests / 0 skipped · frontend 17 · mocks 6 + 11 · docs check · compose config · stack up (95 s) · smoke 29/29 · integration 8/8 |
+| 16 | `npm run typecheck` / `npx vitest run` / `npm run build` (web-frontend, **2026-11-14**, Arch Linux, Node 26.13.0, npm 12.2.2; `/demo` work) | 0 / 0 / 0 | **118 tests, 10 files, 0 skipped**; bundle 286 kB (gzip 92 kB) |
+| 17 | `docker compose build web-frontend` + `up -d web-frontend` (same machine, stack on `GATEWAY_HOST_PORT=9090`) | 0 / 0 | `npm ci` in the image succeeds with the new lockfile; container `healthy`; `GET /demo` through the gateway → 200 |
+| 18 | `GATEWAY_URL=http://localhost:9090 bash scripts/smoke.sh` | **0** | 29/29 |
+| 19 | `GATEWAY_URL=http://localhost:9090 node --test tests/integration/slice.test.mjs` | **0** | 8/8, 0 skipped. Without `GATEWAY_URL` the test targets 8080 and fails with 404 (environment, not code) |
+| 20 | `/demo` opened in Chrome through Chrome DevTools, against the real stack | — | three columns side by side at 1440/1366 px, stacked at 1280/390 px, no horizontal overflow; offline → PENDING, reconnect → SYNCED once, resend → `ALREADY_EXISTS`; QR and scan show the real 404/501 (no successful scan is possible yet); console clean. **Maven was not run on this machine** (no JDK 21 / `mvn`); no Java file changed |
 
 ### Findings fixed during verification
 1. **Maven ran on JDK 17** because `JAVA_HOME` pointed there → documented in README and guarded by `make check-java`.
@@ -75,11 +80,11 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 
 ## 4. Not verified / caveats of this verification
 
-- `NOT_TESTED`: the UI in a real browser (only SSR render tests, served HTML and a build exist); Linux/macOS; CI; k6; `make test|up|integration|reset`.
+- `NOT_TESTED`: the *Status*, *Dev slice* and placeholder pages in a real browser (only `/demo` was exercised there, row 20); macOS; CI; k6; `make test|up|integration|reset`. Linux was used only for the web-frontend rows 16–20.
 - Mock and Java HTTP tests use JDK `HttpServer` / Node over loopback, **not** a real turnstile. Mock latency says nothing about hardware.
 - Docker image builds run with `-DskipTests` (tests run on the host/CI via `mvn test`); a successful image build is not evidence of passing tests.
 - Harmless warnings: Mockito "self-attaching" agent (a future JDK will forbid it); npm `install-scripts` notice for esbuild.
 
 ## 5. Dev-only / mock items (must not reach a "production" build)
 
-`/api/dev/attendance/*` and `/api/dev/kiosk/*` (profile `dev`, unauthenticated) · the two matching `location` blocks in `nginx-gateway/nginx.conf` · `QueueSyntheticEventUseCase` (synthetic events, no QR/TOTP) · column `attendance_events.dev_fixture` · `mock-turnstile-api`, `mock-hr-payroll-api` · password `dev-only-change-me` · `HEALTH_SHOW_DETAILS=always` · `kiosk.central.sync-path=/api/dev/attendance/sync`.
+`/api/dev/attendance/*` and `/api/dev/kiosk/*` (profile `dev`, unauthenticated) · the two matching `location` blocks in `nginx-gateway/nginx.conf` · `QueueSyntheticEventUseCase` (synthetic events, no QR/TOTP) · column `attendance_events.dev_fixture` · `mock-turnstile-api`, `mock-hr-payroll-api` · password `dev-only-change-me` · `HEALTH_SHOW_DETAILS=always` · `kiosk.central.sync-path=/api/dev/attendance/sync` · `web-frontend` `/demo` (calls the dev routes above; uses the synthetic employees EMP001–EMP004)
