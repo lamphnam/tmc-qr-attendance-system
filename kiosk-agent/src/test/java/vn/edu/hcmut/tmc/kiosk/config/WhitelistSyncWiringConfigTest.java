@@ -74,7 +74,7 @@ class WhitelistSyncWiringConfigTest {
                 .withBean(Clock.class, () -> CLOCK)
                 .withBean(CentralSyncSwitch.class, () -> centralSync)
                 .withBean(IWhitelistSnapshotStore.class, () -> store)
-                .withPropertyValues("kiosk.whitelist.api-key=");
+                .withPropertyValues("kiosk.whitelist.api-key=", "kiosk.whitelist.sync-interval-ms=86400000");
     }
 
     private static WhitelistSnapshot testSnapshot() {

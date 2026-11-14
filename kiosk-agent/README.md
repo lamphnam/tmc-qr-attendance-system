@@ -4,11 +4,11 @@ Owner: **Khánh** · package `vn.edu.hcmut.tmc.kiosk` · port 8080 (host 8085) �
 
 Offline-first edge agent. The **durable SQLite queue and the store-and-forward sync are real and tested**; the **actual QR scan (TOTP, whitelist, anti-replay) is not implemented**, so `POST /api/local/scan` answers `501`.
 
-The local whitelist domain and SQLite snapshot store are implemented, including AES-256-GCM protection of non-null verification material (D08). HTTP → use case → SQLite is wired behind a flag defaulting to false and tested with mock Central; no automatic whitelist sync, real Central revision integration or scan/TOTP integration is claimed. The label remains DEV_SLICE.
+The local whitelist domain and SQLite snapshot store are implemented, including AES-256-GCM protection of non-null verification material (D08). HTTP → use case → SQLite and periodic whitelist sync are implemented behind a flag defaulting to false, tested with mock Central. Real Central revision and scan/TOTP integration remain unverified/unimplemented respectively. The label remains DEV_SLICE.
 
-`SyncWhitelistUseCase` and the real HTTP source are singleton beans only when `KIOSK_WHITELIST_SYNC_ENABLED=true`. The default is false in every profile; bean registration never triggers a fetch. See [opt-in wiring](#employee-mapping-and-conditional-wiring).
+`SyncWhitelistUseCase`, the HTTP source and its lifecycle scheduler are singleton beans only when `KIOSK_WHITELIST_SYNC_ENABLED=true`. The default is false in every profile; the first scheduled fetch waits a complete interval. See [whitelist scheduling](#whitelist-scheduling).
 
-`WhitelistHttpTransport` implements explicit HTTP fetching/validation of Central's employee array. It is an Infrastructure-only component, not an `IWhitelistSnapshotSource` implementation; no call is automatically triggered. An explicit use-case invocation can persist a valid snapshot only after opting in. See [HTTP transport](#whitelist-http-transport-only).
+`WhitelistHttpTransport` implements HTTP fetching/validation of Central's employee array. It is an Infrastructure-only component, not an `IWhitelistSnapshotSource` implementation, and creates no trigger itself. After opt-in, scheduled or explicit use-case calls can persist valid snapshots. See [HTTP transport](#whitelist-http-transport-only).
 
 | Route | Status |
 |---|---|
@@ -26,7 +26,7 @@ The local whitelist domain and SQLite snapshot store are implemented, including 
 - **Durability scope:** WAL + `synchronous=FULL` cover a process crash or restart, not a disk failure ([limitations](../docs/DECISIONS.md#known-limitations)). Use the named volume, not a Windows bind mount (B17).
 
 ## Configuration (env, see `src/main/resources/application.yml`)
-`KIOSK_ID`, `KIOSK_FACTORY_ID`, `KIOSK_DEFAULT_GATE_ID`, `SQLITE_PATH` (`/data/kiosk.db` in Compose, `./data/kiosk.db` otherwise), `CENTRAL_BASE_URL`, `CENTRAL_SYNC_PATH`, `CENTRAL_SYNC_DISABLED`, `TURNSTILE_BASE_URL`, `KIOSK_SYNC_ENABLED`, `KIOSK_SYNC_INTERVAL_MS`, `KIOSK_WHITELIST_SYNC_ENABLED` (false by default; independent of Attendance Sync).
+`KIOSK_ID`, `KIOSK_FACTORY_ID`, `KIOSK_DEFAULT_GATE_ID`, `SQLITE_PATH` (`/data/kiosk.db` in Compose, `./data/kiosk.db` otherwise), `CENTRAL_BASE_URL`, `CENTRAL_SYNC_PATH`, `CENTRAL_SYNC_DISABLED`, `TURNSTILE_BASE_URL`, `KIOSK_SYNC_ENABLED`, `KIOSK_SYNC_INTERVAL_MS`, `KIOSK_WHITELIST_SYNC_ENABLED` (false by default) and `KIOSK_WHITELIST_SYNC_INTERVAL_MS` (60000 by default). Whitelist settings are independent of Attendance Sync.
 
 ## Tests
 `mvn test` uses real SQLite files (the production `SqliteConfig`), real loopback HTTP, ArchUnit layering and a full in-JVM offline → PENDING → reconnect → SYNCED walk-through. No mocking framework is used for the stores or HTTP.
@@ -97,12 +97,12 @@ one shared `SyncWhitelistUseCase` using the existing store/switch/identity/Clock
 explicit replacement bean exists. The composition root imports the HTTP configuration; use-case construction resolves
 the source normally, without a registration-order-dependent `@ConditionalOnBean` check.
 
-Opt-in prepares the pipeline only. There is **no whitelist scheduler, startup fetch, public endpoint or current
-production entrypoint**. Explicit test/Java callers obtain the shared use-case bean and call `run()`; do not construct
+Opt-in now starts a delayed periodic trigger, described below. There is **no immediate startup fetch or new public
+endpoint**. Explicit test/Java callers may still obtain the shared use-case bean and call `run()`; do not construct
 another instance. `/api/dev/kiosk/sync/run` remains Attendance-only. Missing API keys or a headerless Central do not
-prevent startup: explicit runs return the existing safe failure reports and keep the old cache. Offline remains
+prevent startup: scheduled/explicit runs return the existing safe failure reports and keep the old cache. Offline remains
 controlled by `CentralSyncSwitch`; enabling the feature does not override it. `.env.example` and Compose forward
-the new flag with a false default; `KIOSK_API_KEY` and `KIOSK_WHITELIST_KEY_BASE64` retain separate roles.
+the flag with a false default; `KIOSK_API_KEY` and `KIOSK_WHITELIST_KEY_BASE64` retain separate roles.
 
 `WhitelistEmployeeMapperTest` checks UTF-8, supported statuses, invalid data, defensive copies and safe diagnostics. `WhitelistSyncWiringConfigTest` supplies explicit test-only revision-bearing fixtures to verify singleton sharing/backoff, existing Clock/identity/store reuse and the shared offline switch. Fixture commits use a temporary SQLite database; no HTTP array is assigned a fabricated revision or written to a real kiosk cache.
 
@@ -132,5 +132,33 @@ connection failures become a fixed `CentralUnavailableException`. Neither includ
 
 Central's revision code is not assumed merged or verified locally. Until it is available, the adapter rejects the
 old headerless response; legacy employee-only transport remains callable. A real Central revision integration test
-and any operational trigger remain separate work. Earlier adapter-only evidence is in [STATUS §14](../docs/STATUS.md#14-kiosk-http-snapshot-source-2026-11-14);
-current HTTP mock → Spring use case → SQLite/AES verification is in [STATUS §15](../docs/STATUS.md#15-whitelist-opt-in-wiring-2026-11-14).
+remains separate work. Adapter-only and explicit wiring evidence remain in STATUS §§14–15; latest scheduler evidence
+is in [STATUS §16](../docs/STATUS.md#16-whitelist-scheduler-2026-11-14).
+
+## Whitelist scheduling
+
+Enable deliberately with `KIOSK_WHITELIST_SYNC_ENABLED=true`. False/missing creates no whitelist scheduler,
+source or use-case bean and makes no scheduled whitelist request. `KIOSK_WHITELIST_SYNC_INTERVAL_MS` maps to
+`kiosk.whitelist.sync-interval-ms`, defaults to **60000 ms**, and must be an integer in **1000..86400000 ms**.
+An invalid interval fails enabled startup; the disabled feature ignores its unused interval. Restart to change these
+deployment settings. This interval is a scheduling delay, not a cache TTL or a rotation policy.
+
+`WhitelistSyncScheduler` starts through Spring `SmartLifecycle` after bean initialization. The first pass waits
+one full interval; each later pass waits the same delay after the previous pass finishes. Its single daemon worker,
+`tmc-whitelist-sync`, is private, not a Spring TaskScheduler/ScheduledExecutorService bean, so it cannot become
+Attendance's default scheduler or occupy that scheduler's thread. No new endpoint or eager startup request is added.
+
+Every pass calls only the existing singleton use case. Offline skips HTTP; its existing non-reentrant guard also
+arbitrates explicit concurrent calls. Scheduler lifecycle synchronization protects start/stop only, not the sync
+operation. HTTP remains outside SQLite transactions; source revision and atomic commit rules are unchanged.
+Stopping cancels future ticks, does not interrupt an in-flight commit, and waits up to 10 seconds for the worker;
+an unusually long in-flight pass can finish after that wait. No disk-loss or cross-process locking guarantee is added.
+
+UPDATED is logged at INFO with the numeric revision; idle/offline/already-running outcomes at DEBUG; expected
+source/cache failures at WARN using only the safe status enum. Unexpected RuntimeExceptions produce a fixed WARN,
+without exception text/cause, and do not cancel the next scheduled execution. Old cache is preserved according to
+the use-case/store contract. There is no extra retry loop or second sync lock.
+
+Tests cover lifecycle/timing, invalid/default configuration, offline and singleton concurrency, plus a real scheduled
+HTTP-mock 503 → next-cycle encrypted SQLite commit. Central's actual monotonic revision/consistent factory snapshot
+and production factory authorization still need verification; enabling the flag does not establish either.

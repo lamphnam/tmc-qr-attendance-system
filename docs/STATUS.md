@@ -298,3 +298,32 @@ hay cấp quyền cho client. Không đổi Domain Contract, schema, AES codec/r
 Hướng dẫn cấu hình/trigger: [Kiosk README](../kiosk-agent/README.md#employee-mapping-and-conditional-wiring).
 ArchUnit giữ nguyên luật; 3 Kiosk architecture cases là tập con của tổng Kiosk, không cộng lặp. Docs links/anchors
 và whitespace hợp lệ. Không chạy Docker Compose hoặc Central thật trong lượt này.
+
+## 16. Whitelist scheduler (2026-11-14)
+
+Bắt đầu từ `0d9f7d5`; Kiosk vẫn **DEV_SLICE**, không đổi dashboard. Lịch sử explicit-only wiring ở §15 giữ nguyên;
+nay flag opt-in cũng tạo `WhitelistSyncScheduler`. Mặc định false, không tạo worker/fetch whitelist. Khi bật,
+`KIOSK_WHITELIST_SYNC_INTERVAL_MS` mặc định 60000 ms, hợp lệ trong 1000..86400000 ms; thiếu dùng mặc định,
+cấu hình sai làm startup enabled thất bại. Disabled bỏ qua interval không sử dụng.
+
+SmartLifecycle bắt đầu fixed delay sau trọn một chu kỳ; executor riêng không đăng ký làm Spring scheduler bean,
+không chiếm luồng Attendance. Scheduler chỉ gọi singleton use case; giữ nguyên offline/version/transaction guard,
+không thêm sync lock, endpoint hoặc fetch tức thời. Chi tiết lifecycle/log/shutdown: [Kiosk README](../kiosk-agent/README.md#whitelist-scheduling).
+
+| Lệnh | Exit | PASS | FAIL | ERROR | SKIP |
+|---|---:|---:|---:|---:|---:|
+| `mvn -B -ntp -pl kiosk-agent -Dtest=WhitelistSyncSchedulerTest,WhitelistSchedulerConfigTest,WhitelistHttpSyncWiringTest,WhitelistSyncWiringConfigTest test` | 0 | 53 | 0 | 0 | 0 |
+| `mvn -B -ntp -pl kiosk-agent test` | 0 | 360 | 0 | 0 | 0 |
+| `mvn -B -ntp -Dtest=*ArchitectureTest test` | 0 | 13 | 0 | 0 | 0 |
+| `node scripts/check-docs.mjs` | 0 | — | — | — | — |
+| `git diff --check` | 0 | — | — | — | — |
+
+25 test mới: scheduler/lifecycle/timing 13, cấu hình 11 và 1 HTTP mock 503 → chu kỳ sau commit SQLite/AES thật.
+Kiểm tra initial delay, fixed delay, long fetch không chồng, trigger explicit dùng chung guard, offline, lỗi không
+làm mất lịch chạy và log không chứa diagnostic nhạy cảm. Tests wiring cũ giữ timer ở interval tối đa để tập trung
+vào explicit calls. Warning khởi động trong các test interval sai là nhánh lỗi được mong đợi, không phải test ERROR.
+Focused tests là tập con của tổng Kiosk. Log/exit code: `kiosk-agent/target/whitelist-scheduler-*`.
+Central revision thật/factory authorization và end-to-end qua gateway chưa kiểm chứng. Không đổi Attendance,
+Scan/TOTP/Anti-Replay/Turnstile, domain port, AES codec, SQLite repository/schema hoặc API contract.
+ArchUnit không đổi luật; 3 Kiosk architecture cases đã nằm trong tổng 360, không cộng lặp. Link/anchor hợp lệ,
+không cảnh báo dòng trùng hoặc lỗi whitespace. Không chạy Docker Compose hay Central thật trong lượt scheduler này.

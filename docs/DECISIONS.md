@@ -140,3 +140,16 @@ This supersedes the earlier unregistered-source stage above without changing the
 True creates a callable pipeline but supplies no scheduler, startup fetch, public route or production entrypoint.
 Explicit calls still obey the shared offline switch and commit/version guards; key/HTTP/header failures keep old cache.
 Real Central revision behavior and factory authorization remain unverified/incomplete. See [current wiring evidence](STATUS.md#15-whitelist-opt-in-wiring-2026-11-14).
+
+## Whitelist scheduler boundary (2026-11-14)
+
+The user authorizes a periodic trigger after the explicit-only wiring stage above. The existing false-by-default
+flag now gates a lifecycle-managed whitelist scheduler as well as source/use case. Default fixed delay and first
+delay are 60000 ms; deployment interval is bounded to 1000..86400000 ms to avoid busy loops or excessive delays.
+These are scheduler configuration limits, not TTL/rotation policy. No production flag is turned on by this change.
+
+A private single-thread executor avoids becoming Spring's default scheduling resource or delaying Attendance's
+existing scheduled job. Only the shared use case is called; no new sync lock, HTTP/store access or endpoint is added.
+Shutdown cancels future ticks without interrupting a commit and waits at most 10 seconds; runtime failures use fixed
+safe logs and leave later ticks alive. Existing offline, source-version and atomic replacement rules are unchanged.
+Real Central revision/auth and cross-service verification remain open. [Behavior and limits](../kiosk-agent/README.md#whitelist-scheduling).

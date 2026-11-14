@@ -14,8 +14,9 @@ kiosk:
   # Gate used by the dev-only synthetic event when the request does not name one.
   default-gate-id: ${KIOSK_DEFAULT_GATE_ID:BD-G01}
   whitelist:
-    # Prepare explicit whitelist sync only; no scheduler or startup fetch.
+    # Opt-in whitelist scheduling; the first fetch waits one complete interval.
     sync-enabled: ${KIOSK_WHITELIST_SYNC_ENABLED:false}
+    sync-interval-ms: ${KIOSK_WHITELIST_SYNC_INTERVAL_MS:60000}
     # HTTP credential only; distinct from the local SQLite encryption key below.
     api-key: ${KIOSK_API_KEY:}
     # External AES-256 key only; no default key and never stored in the SQLite volume.

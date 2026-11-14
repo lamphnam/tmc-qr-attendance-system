@@ -89,6 +89,7 @@ class WhitelistHttpSyncWiringTest {
     private final AtomicInteger transactions = new AtomicInteger();
     private final AtomicInteger writeBegins = new AtomicInteger();
     private SqlHook sqlHook = sql -> { };
+    private Runnable afterCommit = () -> { };
 
     @BeforeEach
     void prepareRealPersistenceAndProductionComposition() {
@@ -112,7 +113,9 @@ class WhitelistHttpSyncWiringTest {
                 .withBean(KioskIdentity.class, () -> IDENTITY)
                 .withBean(Clock.class, () -> Clock.fixed(NOW, ZoneOffset.UTC))
                 .withBean(CentralSyncSwitch.class, () -> centralSync)
-                .withPropertyValues("kiosk.whitelist.sync-enabled=true", "kiosk.whitelist.api-key=" + API_KEY,
+                // Park periodic execution here; this suite's other tests exercise explicit triggers.
+                .withPropertyValues("kiosk.whitelist.sync-enabled=true", "kiosk.whitelist.sync-interval-ms=86400000",
+                        "kiosk.whitelist.api-key=" + API_KEY,
                         "kiosk.whitelist.secret-key-base64=" + encodedKey);
     }
 
@@ -389,12 +392,33 @@ class WhitelistHttpSyncWiringTest {
         });
     }
 
+    @Test
+    void scheduledHttpFailureKeepsCacheAndTheNextCycleCanCommit() {
+        seedOld();
+        CountDownLatch firstFailed = new CountDownLatch(1);
+        CountDownLatch committed = new CountDownLatch(1);
+        afterCommit = committed::countDown;
+        http.expect(requestTo(URL)).andRespond(request -> {
+            firstFailed.countDown();
+            return withStatus(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE).createResponse(request);
+        });
+        expectSnapshot(employees(), "5");
+        context.withPropertyValues("kiosk.whitelist.sync-interval-ms=1000").run(application -> {
+            assertThat(firstFailed.await(5, TimeUnit.SECONDS)).isTrue();
+            assertOld();
+            assertThat(committed.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(stored.inspect()).contains(new WhitelistMetadata("BD-K01", "BD", 5, NOW, 1));
+            assertThat(stored.lookup("NEW").employee()).isPresent();
+        });
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void actualComponentScanAndYamlHonorTheEnvironmentFlagWithoutStartupFetch(boolean enabled) {
         new ApplicationContextRunner().withInitializer(new ConfigDataApplicationContextInitializer())
                 .withUserConfiguration(KioskAgentApplication.class)
                 .withPropertyValues("KIOSK_WHITELIST_SYNC_ENABLED=" + enabled, "kiosk.sync.enabled=false",
+                        "kiosk.whitelist.sync-interval-ms=86400000",
                         "kiosk.sqlite.path=" + dir.resolve("whole-kiosk.db"), "kiosk.whitelist.api-key=")
                 .run(application -> {
                     assertThat(application).hasNotFailed();
@@ -436,6 +460,9 @@ class WhitelistHttpSyncWiringTest {
                                             }
                                         } else if (sql.equals("COMMIT") || sql.equals("ROLLBACK")) {
                                             transactions.decrementAndGet();
+                                            if (sql.equals("COMMIT")) {
+                                                afterCommit.run();
+                                            }
                                         }
                                         return value;
                                     });
