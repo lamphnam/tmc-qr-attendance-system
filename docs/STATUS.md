@@ -1,6 +1,6 @@
 # STATUS — what exists, what was verified
 
-Bootstrap snapshot of **2026-11-01**, with separate Kiosk and User/QR verification records from **2026-11-14** (local UTC+7 date; see §§6–8). These results belong to their respective pre-merge branch snapshots, not the combined working tree; no combined Maven/integration result is claimed. Earlier bootstrap results are historical. Requirement-level status is in [TRACEABILITY](TRACEABILITY.md); remaining work in [TODO](TODO.md); product limitations in [DECISIONS](DECISIONS.md#known-limitations).
+Bootstrap snapshot of **2026-11-01**, with later verification records dated **2026-11-14** (local UTC+7). The Kiosk and User/QR results in §§6–8 belong to separate pre-merge snapshots and must not be added together. Latest Attendance Processor handoff evidence: [§13](#13-attendance-processor-postgresql-recheck-2026-11-14); this module run does not establish a new whole-system result. Earlier runs remain historical. Requirement-level status is in [TRACEABILITY](TRACEABILITY.md); remaining work in [TODO](TODO.md); product limitations in [DECISIONS](DECISIONS.md#known-limitations).
 
 ## Status labels
 
@@ -34,7 +34,7 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 | `nginx-gateway` | Nam / Khoa | **READY** (routing only) | `/gateway/health` | `/services/*/health`, every `/api/v1/*` area reaches its service, JSON 404 for unknown paths (prevents a proxy loop), `X-Request-Id` | TLS/mTLS, authentication, rate limit, CORS allowlist |
 | `user-qr-service` | Khoa | **DEV_SLICE** | `/services/user-qr/health` | dev-only employee-ID QR lifecycle, RFC 6238 TOTP, key-protected whitelist, transactional audit chain; pre-merge 41 module tests including 7 real PostgreSQL tests, zero skipped, also verified on Alpine. Default profile and `/qr/generate` remain 501 | JWT/RBAC, production kiosk identity/factory authorization, Central encryption at rest, HR sync, restricted audit DB role/external anchor, MFA; kiosk HTTP consumer absent, application core exists |
 | `gate-station-service` | Khôi | **SCAFFOLD** | `/services/gate-station/health` | boots + real health; `POST /api/v1/gates`, `GET …/status`, `POST …/manual-open` answer **501** | registration, heartbeat, manual open + audit |
-| `attendance-processor` | Khôi | **DEV_SLICE** | `/services/attendance/health` | real idempotent ingestion and dev-only history GET via `/api/dev/attendance/*`; history reuses the bounded employee/factory/time query, excludes fixtures, and has no authorization. See §12 for current test evidence. Production ingestion POST routes answer **501**; no production History GET route | authenticated production routes, authorized history access, rejected scans (D06), reference validation |
+| `attendance-processor` | Khôi | **DEV_SLICE** | `/services/attendance/health` | real idempotent ingestion and dev-only history GET via `/api/dev/attendance/*`; history reuses the bounded employee/factory/time query, excludes fixtures, and has no authorization. Latest verification: §13; earlier Docker skips: §12. Production ingestion POST routes answer **501**; no production History GET route | authenticated production routes, authorized history access, end-to-end rejected scans (D06), reference-validation policy |
 | `reporting-service` | Nam | **SCAFFOLD** | `/services/reporting/health` | boots + real health; 3 report/dashboard/hr-export routes answer **501**; `tmc.hr-api.base-url` configured | reports, dashboard, HR export scheduler/retry |
 | `kiosk-agent` | Khánh | **DEV_SLICE** | `/services/kiosk/health`; host `8085` | SQLite WAL + `synchronous=FULL`; PENDING committed before the turnstile call; sync by per-id ack with backoff; FAILED only on a per-event rejection; the offline switch cuts only kiosk → central; health reads the real SQLite file. Whitelist domain, atomic SQLite snapshots and local AES-256-GCM secret protection implemented (D08 update below). `POST /api/local/scan` answers **501** | QR scan, TOTP, HTTP whitelist sync, key lifecycle, anti-replay (`used_tokens` table unused), rejected scans, heartbeat, manual open, auth to central |
 | `mock-turnstile-api` | Khánh | **MOCK** | `/health`; host `8090` | `POST /gates/{id}/open`, command counting, failure injection; always `physicalOpenConfirmed:false` | contract is invented by the bootstrap (B18) |
@@ -189,6 +189,8 @@ Môi trường JDK 23.0.1 / compiler release 21. Kiểm chứng UTF-8 chính xá
 
 ## 12. Dev attendance history GET (2026-11-14)
 
+Lịch sử lượt triển khai đầu tiên khi Docker lỗi; kết quả chạy lại sau khi Docker phục hồi ở [§13](#13-attendance-processor-postgresql-recheck-2026-11-14).
+
 Bắt đầu từ `98c3882`, thêm endpoint kiểm tra dữ liệu dev và DTO, tái sử dụng service/read port/SQL hiện có.
 Module vẫn **DEV_SLICE**; không đổi nhãn dashboard, không thay đổi ingestion/idempotency/schema hoặc reporting-service.
 Phạm vi HTTP và giới hạn dữ liệu giả: [attendance README](../backend-services/attendance-processor/README.md#dev-attendance-history).
@@ -212,3 +214,34 @@ không có PostgreSQL container thực chạy trong lượt này. Hai test mới
 nhưng chưa kiểm chứng runtime; dùng canonical schema, không thay PostgreSQL bằng H2/mock.
 Kết quả PostgreSQL PASS ở các lượt trước không được dùng thay bằng chứng cho snapshot hiện tại.
 Log và exit code lưu trong `backend-services/attendance-processor/target/history-api-*` (build artifacts, không stage).
+
+## 13. Attendance Processor PostgreSQL recheck (2026-11-14)
+
+Lượt chạy lại sau §12 trên code History GET, nay ở commit `5b1e5a2`. Module đủ bàn giao ở mức **DEV_SLICE**;
+không đổi nhãn dashboard hoặc tuyên bố hoàn thành production. Môi trường: JDK 23.0.1 / compiler release 21,
+Maven 3.9.16, Docker Engine 28.0.1, Testcontainers 1.21.4.
+
+Lệnh `mvn -B -ntp -pl backend-services/attendance-processor test`: **exit 0**, BUILD SUCCESS, 1 phút 08 giây.
+
+| Phạm vi | PASS | FAIL | ERROR | SKIP |
+|---|---:|---:|---:|---:|
+| Toàn bộ module | **110** | **0** | **0** | **0** |
+| History PostgreSQL integration | 10 | 0 | 0 | 0 |
+| Idempotency PostgreSQL integration | 6 | 0 | 0 | 0 |
+| Attendance ArchUnit | 2 | 0 | 0 | 0 |
+
+Ba dòng chi tiết là tập con của tổng module. Testcontainers thực sự kết nối Docker và tạo hai PostgreSQL 16
+container (`postgres:16-alpine`), nạp schema canonical; không dùng database giả và không có integration test bị SKIP.
+Hai test mới đã PASS:
+
+- `devHttpQueryUsesRealServiceAndPostgresFilteringBoundariesAndStablePages`: HTTP → service → PostgreSQL, scope/range/order/pagination.
+- `devHttpQueryReturnsAnEmptyPageWhenOnlyFixturesExist`: HTTP trả trang rỗng khi chỉ có fixture.
+
+Đối chiếu Surefire XML với log `backend-services/attendance-processor/target/history-api-postgres-retry.log`
+và exit file cùng tên; đây là build artifacts cục bộ, không đưa vào Git. `git diff --check` ở lượt đó cũng exit 0.
+Lượt cập nhật tài liệu hiện tại chỉ đọc lại bằng chứng này, không chạy lại Maven.
+Các lượt SKIP ở §12 được giữ nguyên; không cộng số test giữa các lượt hoặc với kết quả ArchUnit toàn hệ thống.
+
+Phạm vi nghiệm thu: HTTP/service/PostgreSQL của module đã kiểm chứng; chưa chạy lại toàn stack Kiosk/gateway
+trên snapshot bàn giao. Nam cần xác nhận kịch bản tích hợp và dữ liệu reporting; Khoa/Khánh cùng Khôi cần chốt
+auth, scope và event/ACK contract trước khi mở production. Hướng dẫn: [README nghiệm thu](../backend-services/attendance-processor/README.md#dev-handoff-acceptance).

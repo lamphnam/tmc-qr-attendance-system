@@ -1,6 +1,6 @@
 # TRACEABILITY — requirements ↔ code ↔ tests, and the Java class map
 
-The evidence column records separate branch verification (bootstrap 2026-11-01; Kiosk and User/QR 2026-11-14). Preserved test results are pre-merge evidence, not a combined-tree test run; see [STATUS](STATUS.md). `TBD`/empty means nothing yet. Owners update their rows in the PR that changes the status; also update STATUS and `web-frontend/src/catalog.ts`. Status vocabulary: [STATUS](STATUS.md#status-labels); `NOT_MEASURED` = a measurable NFR with no measurement.
+The evidence column retains historical bootstrap and pre-merge Kiosk/User-QR verification. Latest Attendance Processor evidence is the separate post-merge module run in [STATUS §13](STATUS.md#13-attendance-processor-postgresql-recheck-2026-11-14), not a new whole-system test result. `TBD`/empty means nothing yet. Owners update their rows in the PR that changes the status; also update STATUS and `web-frontend/src/catalog.ts` when changing a module label. Status vocabulary: [STATUS](STATUS.md#status-labels); `NOT_MEASURED` = a measurable NFR with no measurement.
 
 ## FR / NFR / ADR matrix
 
@@ -11,7 +11,7 @@ The evidence column records separate branch verification (bootstrap 2026-11-01; 
 | FR-1.1 | User QR ↔ HR sync | Khoa/Nam | hr-sync integration | NOT_IMPLEMENTED | mock side only: `mock-hr-payroll-api` `GET /mock/hr/employees` (node:test) |
 | FR-1.2 / 1.3 / 1.4 | Dynamic QR, revocation, web UI | Khoa/Khiêm | TOTP generation, revoked QR | DEV_SLICE | `UserQrApplicationService` → domain/application/web tests; `UserQrPostgresIntegrationTest` (7 real PostgreSQL cases, passed 2026-11-14 before merge). Dev employee-ID issue/rotate/revoke/activate and whitelist only; JWT and browser UI absent; kiosk HTTP consumer absent, application core exists |
 | FR-2.1 / 2.2 | Gate station, manual open, audit | Khôi/Khoa | guard role / manual gate | NOT_IMPLEMENTED | `GateStationController` routes answer 501 |
-| FR-3.1 | Kiosk + SQLite + Processor | Khánh/Khôi | scan → ack → idempotency | DEV_SLICE | queue + sync + turnstile only; `POST /api/local/scan` answers 501 (`KioskAgentApplicationTest`). See ADR-01 rows |
+| FR-3.1 | Kiosk + SQLite + Processor | Khánh/Khôi | scan → ack → idempotency | DEV_SLICE | Processor ingestion/idempotency verified against PostgreSQL; [latest evidence](STATUS.md#13-attendance-processor-postgresql-recheck-2026-11-14). Kiosk synthetic queue/sync exists, but `POST /api/local/scan` still answers 501; no complete production scan flow or new whole-stack acceptance claim |
 | FR-3.2 | Reporting + UI | Nam/Khiêm | employee history authorization | NOT_IMPLEMENTED | Attendance query core now has a dev-only inspection endpoint (class map below); production history, authorization and UI remain unimplemented. Reporting service remains unchanged |
 | FR-4.1 / 4.2 | Reporting service | Nam | filtered factory report & dashboard | NOT_IMPLEMENTED | `ReportingController` routes answer 501 |
 | FR-5.1 | JWT / RBAC | Khoa | per-role endpoint authorization | NOT_IMPLEMENTED | tables `roles`, `users`, `user_roles` only |
@@ -77,15 +77,15 @@ Names the team proposed in its design trees (companion text files in the `NAM` D
 | `presentation/controller/AttendanceController` | exists; answers **501** until auth + contract are agreed (B04) |
 | `presentation/mapper/AttendanceSyncResponseMapper` | done (separate per-event ack mapping) |
 | `presentation/dto/BatchSyncRequestDto` | done (+ `BatchSyncResponseDto`, `AttendanceEventDto`, `EventAckDto`, `ErrorResponseDto`) |
-| `application/service/AttendanceIngestionService` | done (transaction orchestration, one transaction per event) |
+| `application/service/AttendanceIngestionService` | implemented/tested: one transaction per event, ACK after commit, duplicate/conflict classification and retryable storage/commit failure; [verification](STATUS.md#13-attendance-processor-postgresql-recheck-2026-11-14) |
 | `domain/model/AttendanceRecord` | done |
 | `domain/service/IdempotencyChecker` | done (classifies a repeated id; the PostgreSQL unique key is the concurrency-safe guard) |
 | `domain/repository/IAttendanceRepository` | done (port in the domain) |
-| `infrastructure/persistence/PostgresAttendanceRepository` | done |
+| `infrastructure/persistence/PostgresAttendanceRepository` | implemented/tested: parameterized insert/read, primary-key dedupe and concurrent retry; real PostgreSQL verification linked above |
 | `domain/model/AttendanceHistoryQuery`, `AttendanceHistoryPage`; `domain/repository/IAttendanceHistoryQuery` | implemented internal read contract: employee + factory required, UTC millisecond [from, to), zero-based offset pages of 1..100 events, occurredAt/attendanceId ASC, fixtures excluded. Not an API/auth contract |
 | `application/service/AttendanceHistoryService` | implemented with constructor-injected read port; `AttendanceHistoryModelsTest` (21) and `AttendanceHistoryServiceTest` (4) passed on 2026-11-14, JDK 23 / release 21 |
-| `infrastructure/persistence/PostgresAttendanceHistoryQuery` | implemented parameterized JdbcTemplate SELECT, bounded page + hasNext, no write-repository changes. The original 8 PostgreSQL history cases are retained and 2 HTTP/service/PostgreSQL cases added; current execution evidence and Docker limitations are in [STATUS §12](STATUS.md#12-dev-attendance-history-get-2026-11-14). Application context verifies unreachable-DB propagation; no fake empty result |
-| `presentation/controller/DevAttendanceHistoryController`; `presentation/dto/AttendanceHistoryResponseDto` | implemented dev-only GET, constructor-injected existing service, validated scope/range/pages, safe 400/503, no-store; no production route or authorization. WebMvc/profile and real-DB test coverage: [STATUS §12](STATUS.md#12-dev-attendance-history-get-2026-11-14) |
+| `infrastructure/persistence/PostgresAttendanceHistoryQuery` | implemented/tested parameterized JdbcTemplate SELECT, bounded page + hasNext, no write-repository changes. Original SQL cases and both new HTTP/service/PostgreSQL cases passed; [STATUS §13](STATUS.md#13-attendance-processor-postgresql-recheck-2026-11-14). Earlier skips remain in §12; storage failure never becomes a fake empty result |
+| `presentation/controller/DevAttendanceHistoryController`; `presentation/dto/AttendanceHistoryResponseDto` | implemented/tested dev-only GET, constructor-injected existing service, validated scope/range/pages, safe 400/503, no-store; WebMvc/profile and real-DB coverage in §13. No production History route, authorization or deployed-gateway acceptance claim |
 | *added by the bootstrap* | `DevAttendanceController`, `ApiExceptionHandler`, `IngestionResult`, `domain/exception/*`, `DomainBeansConfig` |
 
 ### user-qr-service (Khoa)

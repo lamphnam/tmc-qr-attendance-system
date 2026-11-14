@@ -147,6 +147,32 @@ Response must acknowledge **per event** due to mixed success/failure [BASELINE-M
 
 `STORED` or `ALREADY_EXISTS` → mark SYNCED; `RETRYABLE` → retain PENDING and retry; `REJECTED_PERMANENT` → FAILED and notify. Repeated calls must not create duplicate rows. Rejected scan event schema vs attendance event must be clarified in owner sync.
 
+### Current dev ingestion behavior [DRAFT]
+
+The v1 POST routes above still return 501 without invoking ingestion. Working equivalents are
+`POST /api/dev/attendance/events` and `/api/dev/attendance/sync`, registered only with profile `dev`,
+unauthenticated; use them only with synthetic data. They write `dev_fixture=true`; neither request factory
+nor batch `kioskId` is an authenticated identity. In the current dev DTO, `kioskId` is optional metadata.
+
+| Operation | Implemented result |
+|---|---|
+| Single event, new / same ID and payload | 200 `STORED` / `ALREADY_EXISTS`, with `duplicate: false` / `true` |
+| Single event, same ID but different business payload | 409 `ATTENDANCE_ID_CONFLICT`; original row unchanged |
+| Single event, validation / DB constraint / storage failure | 400 / 422 `EVENT_REJECTED` / 503 `STORAGE_UNAVAILABLE` |
+| Valid batch envelope | 200 with per-event `results`, including failed events; never interpret 200 alone as an ACK |
+| Invalid JSON or batch envelope | 400 before processing; a batch must contain 1..500 events |
+
+Missing/invalid fields use `VALIDATION_ERROR` or `INVALID_EVENT`; unreadable JSON uses `MALFORMED_REQUEST`.
+Once deserialized, null elements and invalid event values are individually rejected; transient storage/transaction
+failures yield `RETRYABLE` for that event. Conflict/constraint failures map to `REJECTED_PERMANENT` in a batch.
+Successful per-event ACKs are returned only after that event's transaction commits; this is not one batch transaction.
+Failed items may include `reason`; read `results` by ID, not just the supplementary ID lists.
+
+Dedupe uses `attendanceId`, not `Idempotency-Key` or batch identity. Business comparison uses normalized IDs,
+direction/result and millisecond event time; `sourceKioskId` / `devFixture` metadata do not change a fact's identity.
+Retry the same fact with the same ID after a lost ACK. Dev behavior does not finalize production auth/conflict policy.
+Runnable examples and deployment limits: [processor acceptance guide](../backend-services/attendance-processor/README.md#dev-handoff-acceptance).
+
 ### Dev-only attendance history [DRAFT]
 
 There is no agreed production Attendance History GET contract. The owner's requested M2 inspection route is
