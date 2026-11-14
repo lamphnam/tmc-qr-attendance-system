@@ -174,3 +174,15 @@ Snapshot làm việc bắt đầu từ merge commit `1dfc793`. Chỉ hoàn thàn
 | `mvn -B -ntp -Dtest=*ArchitectureTest test` | 0 | 13 PASS, 0 FAIL/ERROR/SKIP trong 5 module; 3 Kiosk tests đã nằm trong tổng trên |
 
 Chạy trên JDK 23.0.1 / compiler release 21. HTTP dùng loopback server và client timeout thực; configuration test dùng Spring HTTP mock. Đã đo các nhánh 200/empty, non-200, timeout header/body, mất kết nối, malformed/missing/null/duplicate data, sai factory, credential chỉ trên request whitelist và thông báo lỗi không lộ fixture nhạy cảm. Không cần Central/Docker thực chạy; không gọi API khi khởi động. Không chạy lại PostgreSQL integration hoặc toàn bộ tests backend trong lượt này. Snapshot revision, authenticated scope và tích hợp với `SyncWhitelistUseCase` vẫn chờ contract Khoa/Khánh.
+
+## 11. Whitelist employee mapping và conditional DI (2026-11-14)
+
+Bắt đầu từ `35ef043`; nhãn kiosk vẫn **DEV_SLICE**. Mapper chỉ tạo employee domain, không tạo scope/snapshot/revision. Conditional wiring dùng các bean store, Clock, identity và switch có sẵn; chỉ tạo singleton use case khi source đã được đăng ký, không tạo source fallback. Ứng dụng hiện tại không có source nên không có use-case bean hoặc HTTP-to-cache flow. [Giới hạn và thứ tự cấu hình](../kiosk-agent/README.md#employee-mapping-and-conditional-wiring).
+
+| Lệnh | Exit | Kết quả thực chạy |
+|---|---|---|
+| `mvn -B -ntp -pl kiosk-agent -Dtest=WhitelistEmployeeMapperTest,WhitelistSyncWiringConfigTest test` | 0 | 21 PASS: mapper 17, wiring 4; 0 FAIL/ERROR/SKIP |
+| `mvn -B -ntp -pl kiosk-agent test` | 0 | 253 PASS, 0 FAIL/ERROR/SKIP, gồm 21 test mới và 3 Kiosk ArchUnit tests |
+| `mvn -B -ntp -Dtest=*ArchitectureTest test` | 0 | 13 PASS, 0 FAIL/ERROR/SKIP trong 5 module; không cộng lặp vào tổng module |
+
+Môi trường JDK 23.0.1 / compiler release 21. Kiểm chứng UTF-8 chính xác, không decode Base64, defensive copy, dữ liệu không hợp lệ, redaction, singleton/backoff, guard chia sẻ và offline. Chỉ test context cung cấp source fixture có revision khai báo sẵn; persistence trong test dùng SQLite tạm và AES thật, HTTP mock không nhận request. Không chạy Central/PostgreSQL/Docker hoặc cập nhật schema/API contract. Đường ghi từ HTTP vẫn chờ revision/scope hợp lệ.

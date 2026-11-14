@@ -9,11 +9,17 @@ import org.springframework.core.env.Environment;
 import org.springframework.web.client.RestClient;
 
 import vn.edu.hcmut.tmc.kiosk.domain.model.KioskIdentity;
+import vn.edu.hcmut.tmc.kiosk.infrastructure.sync.WhitelistEmployeeMapper;
 import vn.edu.hcmut.tmc.kiosk.infrastructure.sync.WhitelistHttpTransport;
 
 /** Avoid storing a credential in configuration records with generated toString methods. No request is scheduled. */
 @Configuration
 public class WhitelistHttpConfig {
+
+    @Bean
+    WhitelistEmployeeMapper whitelistEmployeeMapper() {
+        return new WhitelistEmployeeMapper();
+    }
 
     @Bean
     WhitelistHttpTransport whitelistHttpTransport(@Qualifier("centralRestClient") RestClient client,
