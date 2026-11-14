@@ -106,7 +106,8 @@ class WhitelistSyncWiringConfigTest {
             assertThat(otherConsumer.get().run().status()).isEqualTo(Status.ALREADY_RUNNING);
             return testSnapshot();
         };
-        context.withBean(IWhitelistSnapshotSource.class, () -> fixture).run(application -> {
+        context.withPropertyValues("kiosk.whitelist.sync-enabled=true")
+                .withBean(IWhitelistSnapshotSource.class, () -> fixture).run(application -> {
             assertThat(application).hasNotFailed().hasSingleBean(SyncWhitelistUseCase.class);
             SyncWhitelistUseCase first = application.getBean(SyncWhitelistUseCase.class);
             otherConsumer.set(application.getBean(SyncWhitelistUseCase.class));
@@ -133,7 +134,8 @@ class WhitelistSyncWiringConfigTest {
             calls.incrementAndGet();
             return testSnapshot();
         };
-        context.withBean(IWhitelistSnapshotSource.class, () -> fixture).run(application -> {
+        context.withPropertyValues("kiosk.whitelist.sync-enabled=true")
+                .withBean(IWhitelistSnapshotSource.class, () -> fixture).run(application -> {
             SyncWhitelistUseCase useCase = application.getBean(SyncWhitelistUseCase.class);
             assertThat(application.getBean(CentralSyncSwitch.class)).isSameAs(centralSync);
             assertThat(useCase.run().status()).isEqualTo(Status.OFFLINE);
@@ -151,7 +153,8 @@ class WhitelistSyncWiringConfigTest {
     void explicitlyProvidedUseCaseIsNotDuplicatedByConditionalWiring() {
         IWhitelistSnapshotSource fixture = (kioskId, factoryId) -> testSnapshot();
         SyncWhitelistUseCase provided = new SyncWhitelistUseCase(fixture, store, centralSync, IDENTITY, CLOCK);
-        context.withBean(IWhitelistSnapshotSource.class, () -> fixture)
+        context.withPropertyValues("kiosk.whitelist.sync-enabled=true")
+                .withBean(IWhitelistSnapshotSource.class, () -> fixture)
                 .withBean(SyncWhitelistUseCase.class, () -> provided).run(application -> {
                     assertThat(application).hasNotFailed().hasSingleBean(SyncWhitelistUseCase.class);
                     assertThat(application.getBean(SyncWhitelistUseCase.class)).isSameAs(provided);

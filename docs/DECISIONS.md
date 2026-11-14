@@ -126,4 +126,17 @@ state before that agreement; they do not describe the latest adapter availabilit
 No real source bean, scheduler or HTTP-to-cache path is activated. The existing version guard, SQLite transactions
 and AES-GCM remain unchanged. Configured identity and factory row checks are not authorization: the dev key is still
 not factory-bound. Central must return a complete factory view and revision consistently, including an empty view;
-its actual implementation and end-to-end integration remain unverified here. See [Kiosk source boundary](../kiosk-agent/README.md#http-snapshot-source-not-activated).
+its actual implementation and end-to-end integration remain unverified here. See [Kiosk source boundary](../kiosk-agent/README.md#http-snapshot-source-explicit-only).
+
+## Whitelist opt-in composition (2026-11-14)
+
+The user authorizes HTTP source → existing use case → SQLite composition behind
+`KIOSK_WHITELIST_SYNC_ENABLED`, default false. Infrastructure registers the real source; the composition root
+imports that configuration and resolves its domain port through constructor injection, avoiding source-registration
+ordering requirements. Both source and use case remain singleton/back-off beans; existing explicit replacements
+are preserved. False disables the supplied pipeline beans, not independently callable transport primitives.
+
+This supersedes the earlier unregistered-source stage above without changing the version/auth contract.
+True creates a callable pipeline but supplies no scheduler, startup fetch, public route or production entrypoint.
+Explicit calls still obey the shared offline switch and commit/version guards; key/HTTP/header failures keep old cache.
+Real Central revision behavior and factory authorization remain unverified/incomplete. See [current wiring evidence](STATUS.md#15-whitelist-opt-in-wiring-2026-11-14).

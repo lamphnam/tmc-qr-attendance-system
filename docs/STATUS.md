@@ -250,7 +250,7 @@ auth, scope và event/ACK contract trước khi mở production. Hướng dẫn:
 
 Bắt đầu từ `0a133e9`; Kiosk vẫn **DEV_SLICE**, không đổi nhãn dashboard. Theo contract người dùng xác nhận đã
 thống nhất với Khoa, adapter đọc `X-Whitelist-Version` dương kiểu long từ cùng response với JSON array.
-Chi tiết parsing, scope và lỗi: [Kiosk README](../kiosk-agent/README.md#http-snapshot-source-not-activated).
+Chi tiết parsing, scope và lỗi: [Kiosk README](../kiosk-agent/README.md#http-snapshot-source-explicit-only).
 
 Đã có `RestWhitelistSnapshotSource`, chưa đăng ký bean, chưa kích hoạt use case/scheduler hoặc ghi cache từ HTTP.
 Central revision implementation không được giả định đã merge; chỉ mock/loopback được kiểm chứng, chưa có test với
@@ -270,3 +270,31 @@ xác nhận cấu hình hiện tại không cung cấp source bean. Các lượt
 Môi trường JDK 23.0.1 / compiler release 21, Maven 3.9.16. Log/exit code: `kiosk-agent/target/whitelist-source-*`.
 ArchUnit toàn hệ thống gồm 3 Kiosk tests đã nằm trong tổng 311; không cộng lặp. Link/anchor tài liệu hợp lệ,
 không cảnh báo dòng trùng hoặc lỗi whitespace. Không sửa luật ArchUnit, API contract hay code Central.
+
+## 15. Whitelist opt-in wiring (2026-11-14)
+
+Bắt đầu từ `8a4b9f4`; Kiosk vẫn **DEV_SLICE**, không đổi nhãn dashboard. Bước adapter-only ở §14 giữ nguyên
+làm lịch sử; nay Infrastructure đăng ký source và composition root đăng ký một use-case singleton khi
+`KIOSK_WHITELIST_SYNC_ENABLED=true` (`kiosk.whitelist.sync-enabled`). Mặc định false ở mọi profile: không tạo
+hai bean này. Bật flag chỉ chuẩn bị pipeline; không có whitelist scheduler, startup fetch, public endpoint hoặc
+entrypoint vận hành mới. Attendance Sync và offline switch hiện có giữ nguyên.
+
+`WhitelistHttpSyncWiringTest` dùng cấu hình Spring thật, HTTP mock và SQLite/AES thật: flag/profile/default/YAML
+environment mapping, singleton và no-startup-work, HTTP ngoài SQLite transaction, version cũ/bằng giữ nguyên
+metadata/ciphertext, empty snapshot, lỗi fetch/credential/header/scope, thiếu AES key và commit rollback, guard chung
+qua fetch/commit, reopen và giữ nguyên attendance queue/used_tokens/metadata khác. Full component scan cũng được kiểm tra.
+
+| Lệnh | Exit | PASS | FAIL | ERROR | SKIP |
+|---|---:|---:|---:|---:|---:|
+| `mvn -B -ntp -pl kiosk-agent -Dtest=WhitelistHttpSyncWiringTest,WhitelistSyncWiringConfigTest,WhitelistHttpConfigTest test` | 0 | 30 | 0 | 0 | 0 |
+| `mvn -B -ntp -pl kiosk-agent test` | 0 | 335 | 0 | 0 | 0 |
+| `mvn -B -ntp -Dtest=*ArchitectureTest test` | 0 | 13 | 0 | 0 | 0 |
+| `node scripts/check-docs.mjs` | 0 | — | — | — | — |
+| `git diff --check` | 0 | — | — | — | — |
+
+Có 24 test mới; focused tests là tập con của tổng Kiosk. Log/exit code ở `kiosk-agent/target/whitelist-wiring-*`.
+Central revision thực tế chưa được kiểm chứng; API key dev chưa ràng buộc quyền theo factory. Flag không xác thực
+hay cấp quyền cho client. Không đổi Domain Contract, schema, AES codec/repository hoặc các thành phần scan/TOTP.
+Hướng dẫn cấu hình/trigger: [Kiosk README](../kiosk-agent/README.md#employee-mapping-and-conditional-wiring).
+ArchUnit giữ nguyên luật; 3 Kiosk architecture cases là tập con của tổng Kiosk, không cộng lặp. Docs links/anchors
+và whitespace hợp lệ. Không chạy Docker Compose hoặc Central thật trong lượt này.

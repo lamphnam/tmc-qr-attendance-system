@@ -12,7 +12,7 @@ import vn.edu.hcmut.tmc.kiosk.domain.model.WhitelistSnapshot;
 import vn.edu.hcmut.tmc.kiosk.domain.port.IWhitelistSnapshotSource;
 
 /**
- * Explicitly constructed HTTP source; not a Spring bean. It neither reads nor changes the cache.
+ * HTTP source registered only by opt-in configuration. It neither reads nor changes the cache.
  * Local identity binds the requested filter, not authorization: the dev credential is not factory-bound.
  * Central must return a complete factory snapshot and its revision from the same database snapshot.
  */

@@ -105,6 +105,7 @@ services:
       SQLITE_PATH: /data/kiosk.db
       KIOSK_ID: ${KIOSK_ID:-BD-K01}
       KIOSK_FACTORY_ID: ${KIOSK_FACTORY_ID:-BD}
+      KIOSK_WHITELIST_SYNC_ENABLED: ${KIOSK_WHITELIST_SYNC_ENABLED:-false}
       KIOSK_WHITELIST_KEY_BASE64: ${KIOSK_WHITELIST_KEY_BASE64:-}
       KIOSK_API_KEY: ${KIOSK_API_KEY:-}
       # Kiosk -> central goes through the gateway, like any other client (docs/API-CONTRACTS.md).

@@ -2,23 +2,26 @@ package vn.edu.hcmut.tmc.kiosk.config;
 
 import java.time.Clock;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 
 import vn.edu.hcmut.tmc.kiosk.application.usecase.CentralSyncSwitch;
 import vn.edu.hcmut.tmc.kiosk.application.usecase.SyncWhitelistUseCase;
 import vn.edu.hcmut.tmc.kiosk.domain.model.KioskIdentity;
 import vn.edu.hcmut.tmc.kiosk.domain.port.IWhitelistSnapshotSource;
 import vn.edu.hcmut.tmc.kiosk.domain.port.IWhitelistSnapshotStore;
+import vn.edu.hcmut.tmc.kiosk.infrastructure.config.WhitelistHttpConfig;
 
-/** Composition only. A genuine revision-bearing source must be registered before this configuration is evaluated. */
+/** Opt-in composition only: registering these singleton beans does not trigger a sync. */
 @Configuration(proxyBeanMethods = false)
+@ConditionalOnProperty(prefix = "kiosk.whitelist", name = "sync-enabled", havingValue = "true")
+@Import(WhitelistHttpConfig.class)
 public class WhitelistSyncWiringConfig {
 
     @Bean
-    @ConditionalOnBean(IWhitelistSnapshotSource.class)
     @ConditionalOnMissingBean(SyncWhitelistUseCase.class)
     SyncWhitelistUseCase syncWhitelistUseCase(IWhitelistSnapshotSource source, IWhitelistSnapshotStore store,
             CentralSyncSwitch centralSync, KioskIdentity identity, Clock clock) {

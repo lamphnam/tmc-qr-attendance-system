@@ -4,11 +4,11 @@ Owner: **Khánh** · package `vn.edu.hcmut.tmc.kiosk` · port 8080 (host 8085) �
 
 Offline-first edge agent. The **durable SQLite queue and the store-and-forward sync are real and tested**; the **actual QR scan (TOTP, whitelist, anti-replay) is not implemented**, so `POST /api/local/scan` answers `501`.
 
-The local whitelist domain and SQLite snapshot store are implemented, including AES-256-GCM protection of non-null verification material (D08). HTTP whitelist synchronization, TOTP and scan integration remain unimplemented; this does not change the DEV_SLICE label.
+The local whitelist domain and SQLite snapshot store are implemented, including AES-256-GCM protection of non-null verification material (D08). HTTP → use case → SQLite is wired behind a flag defaulting to false and tested with mock Central; no automatic whitelist sync, real Central revision integration or scan/TOTP integration is claimed. The label remains DEV_SLICE.
 
-`SyncWhitelistUseCase` implements application orchestration through `IWhitelistSnapshotSource`. The HTTP snapshot-source adapter now exists as an explicitly constructed class, but is not registered as a bean; conditional singleton wiring stays inactive and no whitelist trigger exists. See [HTTP snapshot source](#http-snapshot-source-not-activated).
+`SyncWhitelistUseCase` and the real HTTP source are singleton beans only when `KIOSK_WHITELIST_SYNC_ENABLED=true`. The default is false in every profile; bean registration never triggers a fetch. See [opt-in wiring](#employee-mapping-and-conditional-wiring).
 
-`WhitelistHttpTransport` now implements explicit HTTP fetching/validation of Central's current employee array. It is an Infrastructure-only component, not an `IWhitelistSnapshotSource` implementation; no call is automatically triggered and no data reaches SQLite. See [HTTP transport](#whitelist-http-transport-only).
+`WhitelistHttpTransport` implements explicit HTTP fetching/validation of Central's employee array. It is an Infrastructure-only component, not an `IWhitelistSnapshotSource` implementation; no call is automatically triggered. An explicit use-case invocation can persist a valid snapshot only after opting in. See [HTTP transport](#whitelist-http-transport-only).
 
 | Route | Status |
 |---|---|
@@ -26,7 +26,7 @@ The local whitelist domain and SQLite snapshot store are implemented, including 
 - **Durability scope:** WAL + `synchronous=FULL` cover a process crash or restart, not a disk failure ([limitations](../docs/DECISIONS.md#known-limitations)). Use the named volume, not a Windows bind mount (B17).
 
 ## Configuration (env, see `src/main/resources/application.yml`)
-`KIOSK_ID`, `KIOSK_FACTORY_ID`, `KIOSK_DEFAULT_GATE_ID`, `SQLITE_PATH` (`/data/kiosk.db` in Compose, `./data/kiosk.db` otherwise), `CENTRAL_BASE_URL`, `CENTRAL_SYNC_PATH`, `CENTRAL_SYNC_DISABLED`, `TURNSTILE_BASE_URL`, `KIOSK_SYNC_ENABLED`, `KIOSK_SYNC_INTERVAL_MS`.
+`KIOSK_ID`, `KIOSK_FACTORY_ID`, `KIOSK_DEFAULT_GATE_ID`, `SQLITE_PATH` (`/data/kiosk.db` in Compose, `./data/kiosk.db` otherwise), `CENTRAL_BASE_URL`, `CENTRAL_SYNC_PATH`, `CENTRAL_SYNC_DISABLED`, `TURNSTILE_BASE_URL`, `KIOSK_SYNC_ENABLED`, `KIOSK_SYNC_INTERVAL_MS`, `KIOSK_WHITELIST_SYNC_ENABLED` (false by default; independent of Attendance Sync).
 
 ## Tests
 `mvn test` uses real SQLite files (the production `SqliteConfig`), real loopback HTTP, ArchUnit layering and a full in-JVM offline → PENDING → reconnect → SYNCED walk-through. No mocking framework is used for the stores or HTTP.
@@ -89,15 +89,28 @@ not a running Central; a raw transport result is not proof of authenticated scop
 
 The mapper creates no `WhitelistMetadata`/`WhitelistSnapshot`, source scope or global version. It does not infer authority from factory fields and has no HTTP/storage dependency; the snapshot source below handles request-scope checks. `WhitelistHttpConfig` exposes the stateless mapper alongside the existing transport without connecting or invoking them.
 
-`config/WhitelistSyncWiringConfig` registers the default singleton `SyncWhitelistUseCase` only if an `IWhitelistSnapshotSource` bean is already registered and no use-case bean exists. The source must honor the existing revision/scope contract; merely having that interface is not proof of valid data. Register the real source before this conditional configuration is evaluated and verify its actual Spring context when integrating later. All consumers must inject the shared use-case bean. This prepares composition only: the present application has **no source bean and no use-case bean**, no fallback source, no whitelist scheduler and no HTTP-to-cache path. Missing HTTP credentials still allow queue/cache startup.
+`KIOSK_WHITELIST_SYNC_ENABLED` maps to `kiosk.whitelist.sync-enabled`; it is a startup flag, not a runtime toggle.
+When false/missing, the application provides neither the source nor the whitelist use-case bean; existing transport,
+mapper, local cache and Attendance Sync remain available. When true, Infrastructure's `WhitelistHttpConfig` supplies
+`RestWhitelistSnapshotSource` using the existing transport/mapper/identity/Clock, and the composition root supplies
+one shared `SyncWhitelistUseCase` using the existing store/switch/identity/Clock. Both definitions back off when an
+explicit replacement bean exists. The composition root imports the HTTP configuration; use-case construction resolves
+the source normally, without a registration-order-dependent `@ConditionalOnBean` check.
+
+Opt-in prepares the pipeline only. There is **no whitelist scheduler, startup fetch, public endpoint or current
+production entrypoint**. Explicit test/Java callers obtain the shared use-case bean and call `run()`; do not construct
+another instance. `/api/dev/kiosk/sync/run` remains Attendance-only. Missing API keys or a headerless Central do not
+prevent startup: explicit runs return the existing safe failure reports and keep the old cache. Offline remains
+controlled by `CentralSyncSwitch`; enabling the feature does not override it. `.env.example` and Compose forward
+the new flag with a false default; `KIOSK_API_KEY` and `KIOSK_WHITELIST_KEY_BASE64` retain separate roles.
 
 `WhitelistEmployeeMapperTest` checks UTF-8, supported statuses, invalid data, defensive copies and safe diagnostics. `WhitelistSyncWiringConfigTest` supplies explicit test-only revision-bearing fixtures to verify singleton sharing/backoff, existing Clock/identity/store reuse and the shared offline switch. Fixture commits use a temporary SQLite database; no HTTP array is assigned a fabricated revision or written to a real kiosk cache.
 
-## HTTP snapshot source (not activated)
+## HTTP snapshot source (explicit only)
 
 `RestWhitelistSnapshotSource` implements the existing domain port using the transport, mapper, configured
-`KioskIdentity` and an injected `Clock`. It has no Spring stereotype or bean registration, scheduler, use-case call
-or storage dependency. Its mere presence does not connect HTTP to SQLite.
+`KioskIdentity` and an injected `Clock`. It has no Spring stereotype, scheduler, use-case call or storage dependency;
+Infrastructure configuration registers it only after opt-in. It never writes SQLite directly.
 
 The agreed response is the existing JSON array plus `X-Whitelist-Version`: a positive decimal `long`, monotonically
 increasing per factory and covering membership changes, deletion/factory moves and rotate/revoke/activate.
@@ -113,10 +126,11 @@ and no response kiosk identity or factory authorization is invented. Central mus
 and its revision consistently; the client cannot prove that a well-formed response omitted no rows or is fresh.
 
 Clock time is provisional `cachedAt`, not a revision. The unchanged use case/store will own offline checks,
-serialization and atomic `replaceIfNewer` comparison after later wiring. Invalid response/revision/scope/configuration
+serialization and atomic `replaceIfNewer` comparison. Invalid response/revision/scope/configuration
 becomes a fixed `IllegalArgumentException`; missing credentials, HTTP failures (including 403/501/503), timeout and
 connection failures become a fixed `CentralUnavailableException`. Neither includes upstream causes or payloads.
 
 Central's revision code is not assumed merged or verified locally. Until it is available, the adapter rejects the
-old headerless response; legacy employee-only transport remains callable. Activation and a real Central integration
-test are separate work. Test evidence: [STATUS §14](../docs/STATUS.md#14-kiosk-http-snapshot-source-2026-11-14).
+old headerless response; legacy employee-only transport remains callable. A real Central revision integration test
+and any operational trigger remain separate work. Earlier adapter-only evidence is in [STATUS §14](../docs/STATUS.md#14-kiosk-http-snapshot-source-2026-11-14);
+current HTTP mock → Spring use case → SQLite/AES verification is in [STATUS §15](../docs/STATUS.md#15-whitelist-opt-in-wiring-2026-11-14).
