@@ -18,6 +18,9 @@ server:
   shutdown: graceful
 
 tmc:
+  qr:
+    # No default credential: only trusted kiosk tooling should hold this value, never React.
+    kiosk-api-key: ${KIOSK_API_KEY:}
   # Mock HR/Payroll in Compose is reached by its service DNS name, never by localhost across containers.
   hr-api:
     base-url: ${HR_API_BASE_URL:http://localhost:8091}

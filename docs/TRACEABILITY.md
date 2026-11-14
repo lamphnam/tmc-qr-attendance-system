@@ -1,15 +1,15 @@
 # TRACEABILITY — requirements ↔ code ↔ tests, and the Java class map
 
-The evidence column is filled only with things that exist and ran (2026-11-01). `TBD`/empty means nothing yet. Owners update their rows in the PR that changes the status; also update [STATUS](STATUS.md) and `web-frontend/src/catalog.ts`. Status vocabulary: [STATUS](STATUS.md#status-labels); `NOT_MEASURED` = a measurable NFR with no measurement.
+The evidence column records separate branch verification (bootstrap 2026-11-01; Kiosk and User/QR 2026-11-14). Preserved test results are pre-merge evidence, not a combined-tree test run; see [STATUS](STATUS.md). `TBD`/empty means nothing yet. Owners update their rows in the PR that changes the status; also update STATUS and `web-frontend/src/catalog.ts`. Status vocabulary: [STATUS](STATUS.md#status-labels); `NOT_MEASURED` = a measurable NFR with no measurement.
 
 ## FR / NFR / ADR matrix
 
-`DEV_SLICE` rows use synthetic events (no QR/TOTP) and **do not satisfy** the requirement; they show the plumbing.
+`DEV_SLICE` rows describe partial, dev-only functionality using synthetic data and **do not satisfy the whole requirement**. Attendance/kiosk event fixtures bypass QR/TOTP; User/QR now has tested TOTP generation, while kiosk scan integration remains absent.
 
 | ID | Design element | Owner | Expected test | Status | Actual evidence (class → test) |
 |---|---|---|---|---|---|
 | FR-1.1 | User QR ↔ HR sync | Khoa/Nam | hr-sync integration | NOT_IMPLEMENTED | mock side only: `mock-hr-payroll-api` `GET /mock/hr/employees` (node:test) |
-| FR-1.2 / 1.3 / 1.4 | Dynamic QR, revocation, web UI | Khoa/Khiêm | TOTP generation, revoked QR | NOT_IMPLEMENTED | `UserQrController` routes answer 501 (`UserQrServiceApplicationTest`) |
+| FR-1.2 / 1.3 / 1.4 | Dynamic QR, revocation, web UI | Khoa/Khiêm | TOTP generation, revoked QR | DEV_SLICE | `UserQrApplicationService` → domain/application/web tests; `UserQrPostgresIntegrationTest` (7 real PostgreSQL cases, passed 2026-11-14 before merge). Dev employee-ID issue/rotate/revoke/activate and whitelist only; JWT and browser UI absent; kiosk HTTP consumer absent, application core exists |
 | FR-2.1 / 2.2 | Gate station, manual open, audit | Khôi/Khoa | guard role / manual gate | NOT_IMPLEMENTED | `GateStationController` routes answer 501 |
 | FR-3.1 | Kiosk + SQLite + Processor | Khánh/Khôi | scan → ack → idempotency | DEV_SLICE | queue + sync + turnstile only; `POST /api/local/scan` answers 501 (`KioskAgentApplicationTest`). See ADR-01 rows |
 | FR-3.2 | Reporting + UI | Nam/Khiêm | employee history authorization | NOT_IMPLEMENTED | Internal attendance history query core exists in attendance-processor (class map below); no history endpoint, authorization or UI. Reporting service remains unchanged |
@@ -19,15 +19,15 @@ The evidence column is filled only with things that exist and ran (2026-11-01). 
 | NFR-1 | Kiosk fast path | Khánh/Nam | 800/30 min + p95/p99 | NOT_MEASURED | no real scan path exists yet |
 | NFR-2 | SQLite WAL + direct sync | Khánh/Khôi/Nam | 20 offline + restart + lost ack | DEV_SLICE | `slice.test.mjs` "central really DOWN and a kiosk RESTART" (1 event, process restart); `SQLiteAttendanceRepositoryTest.pendingEventSurvivesReopeningTheDatabaseFile`. **Not** the 20-event T02 scenario, **not** disk failure |
 | NFR-3 | HR batch dedupe | Nam | same Batch_UUID / attendance ids | MOCK | receiver side only: mock HR `node:test` (11) + `slice.test.mjs`; `reporting-service` sends nothing yet |
-| NFR-4 | Encryption, MFA, secret handling | Khoa | credential + transport controls | NOT_IMPLEMENTED (overall) | Kiosk whitelist material protected with AES-256-GCM; local codec/persistence tests below. Transport, Central secret handling and MFA remain unimplemented |
+| NFR-4 | Encryption, MFA, secret handling | Khoa | credential + transport controls | NOT_IMPLEMENTED (overall) | Kiosk whitelist material protected with AES-256-GCM; local codec/persistence tests below. Central has plaintext synthetic dev secrets only (B22); transport protection, Central encryption at rest and MFA remain unimplemented |
 | NFR-5 | Config-driven factory/gate | Khôi/Khánh | add a factory without code | partial | `KioskProperties` / `KioskIdentity` read kiosk id, factory, gate from env; `gates`, `kiosks` tables. No admin API/UI |
 | NFR-6 | Monthly export + retry/alert | Nam | fake-clock schedule + failure | NOT_IMPLEMENTED | `hr_export_*` tables only |
 | NFR-7 | Report query ≤ 30 s | Nam | report on a dataset | NOT_MEASURED | — |
-| NFR-8 | RBAC, tamper-evident audit | Khoa | app permission + checksum integrity | NOT_IMPLEMENTED | `audit_logs` table only |
+| NFR-8 | RBAC, tamper-evident audit | Khoa | app permission + checksum integrity | DEV_SLICE | `AuditChecksumCalculatorTest` and `UserQrPostgresIntegrationTest`: per-field tampering, real row tampering, chain continuity under concurrent writers and transaction rollback passed 2026-11-14. No RBAC, restricted writer role or external anchor; not full immutability |
 | ADR-01 | Offline + SQLite + direct sync | Khánh/Khôi | offline / restart / retry | DEV_SLICE | commit-before-open: `QueueSyntheticEventUseCaseTest.eventIsCommittedAsPendingBeforeTheGateCommandIsSent` · SYNCED only after ack: `SyncPendingEventsUseCaseTest` (6), `KioskAgentApplicationTest.scanWhileOfflineStaysPendingThenSyncsExactlyOnceAfterReconnect` · central idempotency: `AttendanceIdempotencyPostgresIntegrationTest` (6, real PostgreSQL, incl. 8-thread race), `slice.test.mjs` · offline switch (cuts only kiosk → central): `CentralSyncSwitch` |
-| ADR-02 | TOTP, anti-replay | Khoa/Khánh | replay / revocation / skew | NOT_IMPLEMENTED | `used_tokens` remains unused by production code. Whitelist domain and SQLite persistence including local secret protection exist; see the class map below. TOTP and real scan integration are not implemented |
+| ADR-02 | TOTP, anti-replay | Khoa/Khánh | replay / revocation / skew | DEV_SLICE | User/QR TOTP implemented; `TotpCodeGeneratorTest` passed before merge: 6 RFC SHA256 vectors, boundaries, current/previous only, wrong secret/malformed tokens. Kiosk whitelist domain, atomic SQLite persistence, AES-256-GCM protection and SyncWhitelistUseCase application core are implemented/tested locally; see the class map below. Production `used_tokens` integration, kiosk scan/TOTP verification, kiosk HTTP whitelist adapter/scheduler and end-to-end scan remain unimplemented |
 | ADR-03 | Monthly HR export | Nam | retry + idempotency + failure notification | NOT_IMPLEMENTED | mock receiver only |
-| Layering | `presentation → application → domain ← infrastructure` | all | `mvn test` | READY | `*ArchitectureTest` in all 5 Java modules (skeleton services only have `presentation` so far) |
+| Layering | `presentation → application → domain ← infrastructure` | all | `mvn test` | READY | `*ArchitectureTest` in all 5 Java modules; User/QR now has all four layers and checks the JDK crypto exception explicitly (B23) |
 
 Routes that must answer 501 instead of a fake success are asserted by `scripts/smoke.sh` section 4.
 
@@ -85,7 +85,21 @@ Names the team proposed in its design trees (companion text files in the `NAM` D
 | `infrastructure/persistence/PostgresAttendanceHistoryQuery` | implemented parameterized JdbcTemplate SELECT, bounded page + hasNext, no write-repository changes. SQL NOT_TESTED: 8 AttendanceHistoryPostgresIntegrationTest cases skipped on 2026-11-14 (Docker unavailable). Application context test verifies real unreachable-DB failure propagation; no fake empty result |
 | *added by the bootstrap* | `DevAttendanceController`, `ApiExceptionHandler`, `IngestionResult`, `domain/exception/*`, `DomainBeansConfig` |
 
-### user-qr-service (Khoa), gate-station-service (Khôi), reporting-service (Nam)
-The owner supplies the names. The bootstrap provides only `*Application`, a `*Controller` of 501 stubs and `ErrorResponseDto`.
+### user-qr-service (Khoa)
+
+All implemented classes below are dev-slice code; production authentication is not supplied.
+
+- `presentation/controller/UserQrController`: employee-ID QR lifecycle and audit viewer; `KioskWhitelistController`: key-protected snapshot.
+- `QrGenerateContractController`: M1 authenticated route remains 501; `UnimplementedQrController`: non-dev profile remains 501; `ApiExceptionHandler`: safe errors.
+- `presentation/dto/`: `QrActionRequestDto`, `QrResponseDto`, `QrStatusResponseDto`, `WhitelistEmployeeDto`, `AuditLogResponseDto`, existing `ErrorResponseDto`.
+- `application/service/UserQrApplicationService`: use cases/transactions; `QrIssue`: redacted result.
+- `domain/model/`: `EmployeeQr`, `QrStatus`, `AuditEvent`, `AuditLog`; `domain/exception/`: missing/revoked/storage errors.
+- `domain/service/TotpCodeGenerator`, `AuditChecksumCalculator`: deterministic JDK cryptography.
+- `domain/repository/IEmployeeQrRepository`, `IAuditLogRepository` (append only), `IAuditLogQuery` (viewer only).
+- `infrastructure/persistence/PostgresEmployeeQrRepository`, `PostgresAuditLogRepository`; `infrastructure/config/DomainBeansConfig`: clocks/random/domain/repository wiring.
+- Evidence: 41 module tests passed with zero skipped on Alpine/JDK 21, 2026-11-14; `tests/integration/user-qr.test.mjs` passed through the real gateway/PostgreSQL stack as part of 9/9 integration cases.
+
+### gate-station-service (Khôi), reporting-service (Nam)
+The bootstrap provides only `*Application`, a `*Controller` of 501 stubs and `ErrorResponseDto`.
 
 Rule: an empty class for every name in a design tree is **not** SOLID evidence. For an unimplemented feature prefer a clearly labelled stub (501) or a TODO in [TODO](TODO.md) over a class that pretends.

@@ -15,7 +15,7 @@ export interface ServiceDef {
 
 export const SERVICES: ServiceDef[] = [
   { id: 'gateway', name: 'nginx-gateway', owner: 'Nam / Khoa', healthPath: '/gateway/health', status: 'READY', note: 'Routing only. Plain HTTP, no TLS, no auth (dev).' },
-  { id: 'user-qr', name: 'user-qr-service', owner: 'Khoa', healthPath: '/services/user-qr/health', status: 'SCAFFOLD', note: 'Auth, RBAC, TOTP, whitelist: routes answer 501.' },
+  { id: 'user-qr', name: 'user-qr-service', owner: 'Khoa', healthPath: '/services/user-qr/health', status: 'DEV_SLICE', note: 'Dev-only QR lifecycle, TOTP, kiosk-key whitelist and audit chain. JWT/RBAC, encryption at rest and HR sync remain unimplemented; default profile returns 501.' },
   { id: 'gate-station', name: 'gate-station-service', owner: 'Khôi', healthPath: '/services/gate-station/health', status: 'SCAFFOLD', note: 'Registration, heartbeat, manual open: routes answer 501.' },
   { id: 'attendance', name: 'attendance-processor', owner: 'Khôi', healthPath: '/services/attendance/health', status: 'DEV_SLICE', note: 'Idempotent ingestion works via dev-only /api/dev/attendance/*. Production /api/v1 routes answer 501.' },
   { id: 'reporting', name: 'reporting-service', owner: 'Nam', healthPath: '/services/reporting/health', status: 'SCAFFOLD', note: 'Reports, dashboard, HR export: routes answer 501.' },

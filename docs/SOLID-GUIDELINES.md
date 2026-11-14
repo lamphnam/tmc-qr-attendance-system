@@ -201,6 +201,26 @@ Checked against source on **2026-11-02**. Test run the same day: `mvn -B -ntp -p
 | LSP | `kiosk-agent` | [ITurnstileAdapter](../kiosk-agent/src/main/java/vn/edu/hcmut/tmc/kiosk/domain/port/ITurnstileAdapter.java) contract | One contract clients can rely on: `SENT` never means a physical open, failures do not throw | Only the one implementation can be checked today: three `HttpAdaptersTest` cases. `UNSUPPORTED` is undefined with no producer or consumer, and there is no contract test | [HttpAdaptersTest](../kiosk-agent/src/test/java/vn/edu/hcmut/tmc/kiosk/infrastructure/HttpAdaptersTest.java) | LIMITATION |
 | ISP | `kiosk-agent` | [IKioskSyncAPI](../kiosk-agent/src/main/java/vn/edu/hcmut/tmc/kiosk/domain/port/IKioskSyncAPI.java), [ITurnstileAdapter](../kiosk-agent/src/main/java/vn/edu/hcmut/tmc/kiosk/domain/port/ITurnstileAdapter.java), [IAttendanceLocalRepository](../kiosk-agent/src/main/java/vn/edu/hcmut/tmc/kiosk/domain/port/IAttendanceLocalRepository.java) | Three ports by consumer and reason to change (central, local device, queue) | A sync change cannot ripple into the gate command; `IAttendanceLocalRepository` is wide (9 methods, three clients with disjoint subsets), kept on purpose, see §2 ISP | Source inspection 2026-11-02; no test targets this | IMPLEMENTED |
 
+User/QR evidence added 2026-11-14: module test command in [STATUS §8](STATUS.md#8-userqr-verification--2026-11-14),
+41 tests on Alpine/JDK 21, zero skipped, including seven real PostgreSQL cases;
+the gateway/PostgreSQL integration scenario also passed with independent Node checksum verification.
+
+- **SRP — TESTED:** `TotpCodeGenerator` handles RFC 6238; `AuditChecksumCalculator` handles canonical
+  hashing; `UserQrController` handles HTTP; `UserQrApplicationService` coordinates transactions;
+  PostgreSQL repositories own SQL/locking. Domain, application, web and PostgreSQL tests exercise these separately.
+- **DIP / ISP — TESTED (direction/capabilities):** `IEmployeeQrRepository`, append-only `IAuditLogRepository`
+  and read-only `IAuditLogQuery` are domain ports, wired to PostgreSQL in `DomainBeansConfig`.
+  `UserqrArchitectureTest` checks four layers, JDBC exclusion from application and framework-free domain
+  (only JDK `javax.crypto` is exempt, B23). Application mocks isolate orchestration; store guarantees are
+  checked with PostgreSQL, not an in-memory fake.
+- **OCP — DESIGNED:** the stable lifecycle orchestration depends on domain ports; a different store
+  would require a new adapter, wiring and the same locking/transaction contract tests, without editing use cases.
+  Only one production store exists. The ports and their behavioral contracts add maintenance cost;
+  advisory locking is PostgreSQL-specific and transaction participation must be preserved.
+- **LSP — LIMITATION:** no second production adapter or faithful repository fake exists. The real-store tests
+  check transaction requirements, duplicate audit IDs, rollback, serialization and continuous hashes;
+  Mockito stubs do not demonstrate substitutability.
+
 ## 6. Questions a lecturer may ask
 
 Answers point at real code and concede real gaps. A confident, honest "not yet, and here is what it would take" beats an overstated claim.

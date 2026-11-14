@@ -1,6 +1,6 @@
 # STATUS — what exists, what was verified
 
-Snapshot of **2026-11-01** right after the bootstrap. Every result below comes from a command that was actually run on the bootstrap machine; what was not run is `NOT_TESTED`. Re-run the commands on your machine before trusting this. Requirement-level status is in [TRACEABILITY](TRACEABILITY.md); remaining work in [TODO](TODO.md); product limitations in [DECISIONS](DECISIONS.md#known-limitations).
+Bootstrap snapshot of **2026-11-01**, with separate Kiosk and User/QR verification records from **2026-11-14** (local UTC+7 date; see §§6–8). These results belong to their respective pre-merge branch snapshots, not the combined working tree; no combined Maven/integration result is claimed. Earlier bootstrap results are historical. Requirement-level status is in [TRACEABILITY](TRACEABILITY.md); remaining work in [TODO](TODO.md); product limitations in [DECISIONS](DECISIONS.md#known-limitations).
 
 ## Status labels
 
@@ -9,7 +9,7 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 | Label | Meaning |
 |---|---|
 | `READY` | runs for real and is tested |
-| `DEV_SLICE` | real logic, reachable only through unauthenticated dev-only endpoints with synthetic data |
+| `DEV_SLICE` | real partial functionality exposed only in dev with synthetic data; production authentication/authorization is incomplete |
 | `SCAFFOLD` | boots, real health, routes answer HTTP 501 |
 | `MOCK` | stand-in for an external system |
 | `NOT_IMPLEMENTED` | no code yet |
@@ -30,9 +30,9 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 
 | Module | Owner | Status | Entry / health | What really works and is tested | Not there |
 |---|---|---|---|---|---|
-| `central-db` (PostgreSQL 16) | shared | **READY** | `pg_isready -h 127.0.0.1`; host `127.0.0.1:5433` | `init-db/schema.sql` + `seed.sql` load on an empty volume: 11 tables, 2 factories, 2 kiosks, 3 gates, 4 synthetic employees, 6 roles, 0 users | versioned migrations (D02/B01), restricted DB roles (B14) |
+| `central-db` (PostgreSQL 16) | shared | **READY** | `pg_isready -h 127.0.0.1`; host `127.0.0.1:5433` | canonical schema/seed tested on PostgreSQL: 11 tables, 2 factories, 2 kiosks, 3 gates, 9 synthetic employees, 6 roles, 0 users; original attendance tables preserved | versioned migrations (D02/B01), restricted DB roles (B14) |
 | `nginx-gateway` | Nam / Khoa | **READY** (routing only) | `/gateway/health` | `/services/*/health`, every `/api/v1/*` area reaches its service, JSON 404 for unknown paths (prevents a proxy loop), `X-Request-Id` | TLS/mTLS, authentication, rate limit, CORS allowlist |
-| `user-qr-service` | Khoa | **SCAFFOLD** | `/services/user-qr/health` | boots; health reflects real PostgreSQL; `GET /api/v1/qr/generate` and `/api/v1/kiosk/whitelist` answer **501** | JWT/RBAC, TOTP, whitelist, HR sync, revocation, audit chain, MFA |
+| `user-qr-service` | Khoa | **DEV_SLICE** | `/services/user-qr/health` | dev-only employee-ID QR lifecycle, RFC 6238 TOTP, key-protected whitelist, transactional audit chain; pre-merge 41 module tests including 7 real PostgreSQL tests, zero skipped, also verified on Alpine. Default profile and `/qr/generate` remain 501 | JWT/RBAC, production kiosk identity/factory authorization, Central encryption at rest, HR sync, restricted audit DB role/external anchor, MFA; kiosk HTTP consumer absent, application core exists |
 | `gate-station-service` | Khôi | **SCAFFOLD** | `/services/gate-station/health` | boots + real health; `POST /api/v1/gates`, `GET …/status`, `POST …/manual-open` answer **501** | registration, heartbeat, manual open + audit |
 | `attendance-processor` | Khôi | **DEV_SLICE** | `/services/attendance/health` | real idempotent ingestion: single event + batch, per-event ack after commit, SAME vs CONFLICT, 503 when the DB is down, safe under 8 threads on one id. Only via `/api/dev/attendance/*`; `/api/v1/attendance/*` answer **501** | authenticated production routes, rejected scans (D06), reference validation |
 | `reporting-service` | Nam | **SCAFFOLD** | `/services/reporting/health` | boots + real health; 3 report/dashboard/hr-export routes answer **501**; `tmc.hr-api.base-url` configured | reports, dashboard, HR export scheduler/retry |
@@ -84,7 +84,13 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 
 `/api/dev/attendance/*` and `/api/dev/kiosk/*` (profile `dev`, unauthenticated) · the two matching `location` blocks in `nginx-gateway/nginx.conf` · `QueueSyntheticEventUseCase` (synthetic events, no QR/TOTP) · column `attendance_events.dev_fixture` · `mock-turnstile-api`, `mock-hr-payroll-api` · password `dev-only-change-me` · `HEALTH_SHOW_DETAILS=always` · `kiosk.central.sync-path=/api/dev/attendance/sync`.
 
+User/QR dev-only inventory (B21/B22): `/api/v1/qr/{employeeId}` and lifecycle/audit routes,
+`/api/v1/kiosk/whitelist` with a dummy kiosk key in Compose, public dummy seed QR secrets,
+untrusted actor metadata. Requested v1 paths are an explicit demo exception; no profile enables production auth.
+
 ## 6. Kiểm chứng D08 tại kiosk (2026-11-14)
+
+Bằng chứng trước merge trên branch kiosk; các lệnh/kết quả dưới đây thuộc snapshot triển khai D08, không phải lần chạy trên working tree hợp nhất.
 
 Nhãn module vẫn là **DEV_SLICE**; không thay đổi nhãn dashboard. Phần bảo vệ material trong SQLite đã được triển khai theo [D08](DECISIONS.md#d08-kiosk-secret-protection-2026-11-14), không đồng nghĩa scan/TOTP hoặc HTTP whitelist sync đã hoàn thành. Cách cấp khóa và giới hạn khôi phục/rotation: [kiosk README](../kiosk-agent/README.md#local-whitelist-key-d08).
 
@@ -102,6 +108,8 @@ Test thực dùng AES-GCM/JCE và SQLite file: round-trip/reopen, nonce mới, s
 
 ## 7. Whitelist Sync Application Core (2026-11-14)
 
+Bằng chứng trước merge trên branch kiosk sau bước Application Core. Tổng 161 thay cho snapshot Kiosk 138 ở §6; không cộng hai lượt hoặc cộng với User/QR thành kết quả kiểm thử mới.
+
 Đã thêm `IWhitelistSnapshotSource`, `SyncWhitelistUseCase` và `WhitelistSyncReport`; [class map](TRACEABILITY.md#kiosk-agent-khánh) và [ranh giới tích hợp](../kiosk-agent/README.md#whitelist-sync-application-boundary) mô tả phần thực có. Nhãn kiosk vẫn **DEV_SLICE**, không đổi dashboard. Chưa có HTTP adapter, scheduler hoặc bean Whitelist Sync tự chạy; không thay đổi Attendance Sync, schema hay API contract.
 
 | Lệnh | Exit | Kết quả thực chạy |
@@ -113,3 +121,44 @@ Test thực dùng AES-GCM/JCE và SQLite file: round-trip/reopen, nonce mới, s
 | `node scripts/check-docs.mjs` | 0 | Link tài liệu hợp lệ, không cảnh báo dòng trùng |
 
 Môi trường vẫn JDK 23.0.1 / compiler release 21. Test bao phủ offline trước/trong fetch, scope sai, dữ liệu không hợp lệ, version cũ/bằng và version zero, snapshot rỗng, timeout/failure, chống sync chồng trong fetch/commit và gọi đệ quy, writer khác cập nhật trong lúc tải, reopen, thiếu khóa, cache hỏng và commit failure rollback. `UPDATED` chỉ xuất hiện sau durable commit; kết quả không chứa dữ liệu nhân viên hoặc exception text. Một lần chờ công cụ bị timeout dù log Maven đã BUILD SUCCESS; đã chạy lại để xác nhận exit 0, lưu log/mã thoát trong `kiosk-agent/target/whitelist-sync-tests.*`. Chưa kiểm chứng HTTP Whitelist của Central hoặc triển khai nhiều process; guard yêu cầu dùng chung một use-case instance trong kiosk.
+## 8. User/QR verification — 2026-11-14
+
+Incoming branch evidence recorded before this merge. The 40/41 module runs and root 112-test run below refer to that branch's own snapshots and environment. They are retained as historical evidence, not a new combined-tree PASS; the seven PostgreSQL cases are included in the module totals.
+
+Windows host lacks JDK 21/Maven on PATH (JDK 23 installed; WSL has JDK 17).
+Ran Maven in `maven:3.9-eclipse-temurin-21` (Java 21.0.12.1), mounting this workspace,
+the Maven cache and Docker socket, with `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal`.
+
+- `mvn -B -ntp -pl backend-services/user-qr-service test` inside that container: **exit 0**,
+  40 tests, 0 failures/errors, **0 skipped**. Includes 7 real PostgreSQL 16 Testcontainers cases,
+  concurrent same/different employee rotations, atomic rollback on audit failure and real row tampering.
+- `node scripts/verify.mjs --down`: **exit 0**, all 8 stages passed. A temporary ignored Maven
+  command shim delegated to the JDK 21 container (the host JDK was not substituted for Java 21).
+  Used isolated `COMPOSE_PROJECT_NAME=tmc-userqr-m2`, host ports gateway 18080, frontend 13000,
+  kiosk 18085, turnstile 18090, HR 18091, PostgreSQL 15433. Fresh project volumes initialized
+  the changed schema/seed; existing `tmc-qr-attendance` volumes were not reset.
+  Results: root Java **112 tests / 0 failed / 0 errors / 0 skipped**; frontend typecheck/build
+  and **17 tests**; mock turnstile **6/6**, mock HR **11/11**; docs **0 errors / 0 warnings**;
+  Compose config and all healthchecks passed; smoke **31/31**; integration **9/9, 0 skipped**,
+  including the independent Node checksum implementation in `user-qr.test.mjs`.
+  Node TAP output made the script display `?` counts for mocks/integration; actual totals above
+  are from `.verify-logs/mocks.log` and `.verify-logs/integration.log`.
+  `docker compose down` exited **0** for the isolated project, retaining its test volumes.
+- Latest module run, including the additional safe HTTP error test:
+  `mvn -B -ntp -pl backend-services/user-qr-service test` in
+  **`maven:3.9-eclipse-temurin-21-alpine`** with the same workspace/cache/socket mounts:
+  **exit 0**, **41 tests / 0 failures / 0 errors / 0 skipped**. All seven PostgreSQL cases,
+  four architecture rules and both existing application tests ran. Mockito subclass configuration
+  works on Alpine; log: `.verify-logs/user-qr-alpine.log`.
+
+## 9. Kiểm tra tài liệu trong working tree đang merge (2026-11-14)
+
+Lượt này chỉ hợp nhất nội dung tài liệu của hai branch và kiểm tra Markdown/link/anchor. Không chạy lại Maven, PostgreSQL integration hoặc Docker Compose; kiểm chứng chức năng trên working tree hợp nhất là **NOT_RUN**, không suy ra từ tổng PASS trước merge ở §§6–8.
+
+| Kiểm tra tài liệu | Exit | Kết quả |
+|---|---|---|
+| Quét marker trong DECISIONS/STATUS/TRACEABILITY | 0 | Không còn marker conflict trong nội dung file |
+| `git diff --check` | 0 | Không lỗi whitespace |
+| `node scripts/check-docs.mjs` | 0 | Link và anchor hợp lệ, không cảnh báo dòng trùng |
+
+Merge vẫn đang chờ người dùng review; chưa stage file hoặc tạo merge commit. Vì giữ nguyên index, Git vẫn báo ba file unmerged dù marker trong working tree đã được xử lý.

@@ -1,7 +1,7 @@
 # TMC QR Attendance - DEVELOPMENT stack on one machine.
 #
 # This SIMULATES edge + central on a single Docker host (docs/ARCHITECTURE.md "Deployment"). It is not evidence of a physical factory
-# deployment. Plain HTTP, no TLS/mTLS, no authentication, dummy credentials: do not expose it beyond localhost, which is
+# deployment. Plain HTTP, no TLS/mTLS or JWT/RBAC, dummy credentials: do not expose it beyond localhost, which is
 # why every published port below is bound to 127.0.0.1.
 #
 #   docker compose up --build -d --wait      # build + start, returns when every healthcheck passes
@@ -14,7 +14,7 @@ name: tmc-qr-attendance
 
 x-java-env: &java-env
   JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--Xms64m -Xmx192m}
-  # `dev` enables the unauthenticated /api/dev/** fixtures. Never use this profile outside a developer machine.
+  # `dev` enables fixtures plus User/QR's requested v1 demo paths (B21). Never use it outside a developer machine.
   SPRING_PROFILES_ACTIVE: dev
   HEALTH_SHOW_DETAILS: always
 
@@ -61,6 +61,7 @@ services:
     environment:
       <<: [*java-env, *db-env]
       HR_API_BASE_URL: http://mock-hr-payroll-api:8091
+      KIOSK_API_KEY: ${KIOSK_API_KEY:-dev-only-kiosk-change-me}
     depends_on:
       central-db:
         condition: service_healthy
