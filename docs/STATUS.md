@@ -34,7 +34,7 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 | `nginx-gateway` | Nam / Khoa | **READY** (routing only) | `/gateway/health` | `/services/*/health`, every `/api/v1/*` area reaches its service, JSON 404 for unknown paths (prevents a proxy loop), `X-Request-Id` | TLS/mTLS, authentication, rate limit, CORS allowlist |
 | `user-qr-service` | Khoa | **DEV_SLICE** | `/services/user-qr/health` | dev-only employee-ID QR lifecycle, RFC 6238 TOTP, key-protected whitelist, transactional audit chain; pre-merge 41 module tests including 7 real PostgreSQL tests, zero skipped, also verified on Alpine. Default profile and `/qr/generate` remain 501 | JWT/RBAC, production kiosk identity/factory authorization, Central encryption at rest, HR sync, restricted audit DB role/external anchor, MFA; kiosk HTTP consumer absent, application core exists |
 | `gate-station-service` | Khôi | **SCAFFOLD** | `/services/gate-station/health` | boots + real health; `POST /api/v1/gates`, `GET …/status`, `POST …/manual-open` answer **501** | registration, heartbeat, manual open + audit |
-| `attendance-processor` | Khôi | **DEV_SLICE** | `/services/attendance/health` | real idempotent ingestion: single event + batch, per-event ack after commit, SAME vs CONFLICT, 503 when the DB is down, safe under 8 threads on one id. Only via `/api/dev/attendance/*`; `/api/v1/attendance/*` answer **501** | authenticated production routes, rejected scans (D06), reference validation |
+| `attendance-processor` | Khôi | **DEV_SLICE** | `/services/attendance/health` | real idempotent ingestion and dev-only history GET via `/api/dev/attendance/*`; history reuses the bounded employee/factory/time query, excludes fixtures, and has no authorization. See §12 for current test evidence. Production ingestion POST routes answer **501**; no production History GET route | authenticated production routes, authorized history access, rejected scans (D06), reference validation |
 | `reporting-service` | Nam | **SCAFFOLD** | `/services/reporting/health` | boots + real health; 3 report/dashboard/hr-export routes answer **501**; `tmc.hr-api.base-url` configured | reports, dashboard, HR export scheduler/retry |
 | `kiosk-agent` | Khánh | **DEV_SLICE** | `/services/kiosk/health`; host `8085` | SQLite WAL + `synchronous=FULL`; PENDING committed before the turnstile call; sync by per-id ack with backoff; FAILED only on a per-event rejection; the offline switch cuts only kiosk → central; health reads the real SQLite file. Whitelist domain, atomic SQLite snapshots and local AES-256-GCM secret protection implemented (D08 update below). `POST /api/local/scan` answers **501** | QR scan, TOTP, HTTP whitelist sync, key lifecycle, anti-replay (`used_tokens` table unused), rejected scans, heartbeat, manual open, auth to central |
 | `mock-turnstile-api` | Khánh | **MOCK** | `/health`; host `8090` | `POST /gates/{id}/open`, command counting, failure injection; always `physicalOpenConfirmed:false` | contract is invented by the bootstrap (B18) |
@@ -186,3 +186,29 @@ Bắt đầu từ `35ef043`; nhãn kiosk vẫn **DEV_SLICE**. Mapper chỉ tạo
 | `mvn -B -ntp -Dtest=*ArchitectureTest test` | 0 | 13 PASS, 0 FAIL/ERROR/SKIP trong 5 module; không cộng lặp vào tổng module |
 
 Môi trường JDK 23.0.1 / compiler release 21. Kiểm chứng UTF-8 chính xác, không decode Base64, defensive copy, dữ liệu không hợp lệ, redaction, singleton/backoff, guard chia sẻ và offline. Chỉ test context cung cấp source fixture có revision khai báo sẵn; persistence trong test dùng SQLite tạm và AES thật, HTTP mock không nhận request. Không chạy Central/PostgreSQL/Docker hoặc cập nhật schema/API contract. Đường ghi từ HTTP vẫn chờ revision/scope hợp lệ.
+
+## 12. Dev attendance history GET (2026-11-14)
+
+Bắt đầu từ `98c3882`, thêm endpoint kiểm tra dữ liệu dev và DTO, tái sử dụng service/read port/SQL hiện có.
+Module vẫn **DEV_SLICE**; không đổi nhãn dashboard, không thay đổi ingestion/idempotency/schema hoặc reporting-service.
+Phạm vi HTTP và giới hạn dữ liệu giả: [attendance README](../backend-services/attendance-processor/README.md#dev-attendance-history).
+Factory là bộ lọc do client nhập, không phải quyền truy cập; production History GET/authentication/authorization chưa được triển khai.
+Test profile xác nhận không đăng ký controller khi thiếu `dev`; cả route dev lẫn production History GET trả 404 ngoài dev.
+
+| Lệnh trong lượt này | Exit | Kết quả |
+|---|---|---|
+| `mvn -B -ntp -pl backend-services/attendance-processor test` trước sửa | 0 | 63 PASS, 0 FAIL, 0 ERROR, 14 SKIP; tổng 77, không coi SKIP là PASS |
+| `mvn -B -ntp -pl backend-services/attendance-processor -Dtest=DevAttendanceHistoryControllerWebTest,AttendanceHistoryProfileWebTest,AttendanceProcessorApplicationTest test` | 0 | 35 PASS, 0 FAIL/ERROR/SKIP; gồm 29 WebMvc, 1 profile và 5 full-context DB-unavailable |
+| `mvn -B -ntp -pl backend-services/attendance-processor test` sau sửa | 0 | 94 PASS, 0 FAIL, 0 ERROR, 16 SKIP; tổng 110. Có 31 test mới thực chạy so với baseline và 2 PostgreSQL cases mới bị SKIP |
+| `mvn -B -ntp -Dtest=*ArchitectureTest test` | 0 | 13 PASS, 0 FAIL/ERROR/SKIP trong 5 module; không cộng lặp vào tổng module |
+| `node scripts/check-docs.mjs` | 0 | Link/anchor hợp lệ, không cảnh báo dòng trùng |
+| `git diff --check` | 0 | Không lỗi whitespace |
+
+Chạy trên JDK 23.0.1 / compiler release 21, Maven 3.9.16. Cả hai lượt full-module BUILD SUCCESS;
+không cộng test focused hoặc ArchUnit vào tổng 110. Docker Desktop trả HTTP 500 cho cả `/version` và
+`/containers/json?all=1`; không đổi cấu hình hệ thống để vượt qua lỗi.
+Sau sửa, Testcontainers không tìm được Docker khả dụng: toàn bộ 10 history và 6 idempotency PostgreSQL cases bị SKIP,
+không có PostgreSQL container thực chạy trong lượt này. Hai test mới HTTP → service → PostgreSQL đã biên dịch
+nhưng chưa kiểm chứng runtime; dùng canonical schema, không thay PostgreSQL bằng H2/mock.
+Kết quả PostgreSQL PASS ở các lượt trước không được dùng thay bằng chứng cho snapshot hiện tại.
+Log và exit code lưu trong `backend-services/attendance-processor/target/history-api-*` (build artifacts, không stage).

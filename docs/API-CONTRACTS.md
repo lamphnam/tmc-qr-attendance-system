@@ -147,6 +147,41 @@ Response must acknowledge **per event** due to mixed success/failure [BASELINE-M
 
 `STORED` or `ALREADY_EXISTS` → mark SYNCED; `RETRYABLE` → retain PENDING and retry; `REJECTED_PERMANENT` → FAILED and notify. Repeated calls must not create duplicate rows. Rejected scan event schema vs attendance event must be clarified in owner sync.
 
+### Dev-only attendance history [DRAFT]
+
+There is no agreed production Attendance History GET contract. The owner's requested M2 inspection route is
+`GET /api/dev/attendance/history`, registered only in Spring profile `dev`. This does not define or enable
+`GET /api/v1/attendance/history`, nor change the ingestion contracts above or reporting routes below.
+
+Required query parameters: `employeeId`, `factoryId`, `fromInclusive`, `toExclusive`.
+IDs must be nonblank. Times are ISO-8601 instants with a timezone, at millisecond precision or coarser,
+with `fromInclusive < toExclusive`; matching is `[fromInclusive, toExclusive)`.
+Optional `page` (zero-based, default 0, nonnegative int) and `size` (default 20, int 1..100).
+Rows must match both filters, exclude `dev_fixture=true`, and sort by `occurredAt ASC, attendanceId ASC`.
+Stored ALLOWED and REJECTED facts are both returned. Response 200:
+
+```json
+{
+  "events": [
+    {"attendanceId":"c5b0ff1a-2c59-4333-ac72-1b41b84e84a1","employeeId":"EMP001","factoryId":"BD",
+     "gateId":"BD-G01","direction":"IN","occurredAt":"2026-11-14T01:00:00Z","scanResult":"ALLOWED"}
+  ],
+  "page": 0, "size": 20, "hasNext": false
+}
+```
+
+No matches produce `events: []`, `hasNext: false`, retaining the requested page/size.
+`hasNext` describes the same SELECT as the returned rows; offset pages can shift between requests as data arrives.
+No total count, aggregation, or payroll interpretation is exposed.
+Missing/invalid filters, times or pagination return 400 `VALIDATION_ERROR`; database failure returns
+503 `STORAGE_UNAVAILABLE`, using the shared `{code, message, correlationId}` shape without echoed inputs.
+Success and handled query errors carry `X-TMC-Dev-Only: true` and `Cache-Control: no-store`.
+
+**Unauthenticated dev access only:** the caller's factory parameter does not grant authorization.
+Anyone who can reach this route can query any factory. Use only synthetic data in a trusted local dev environment;
+production employee identity, RBAC and factory authorization remain unimplemented and require owner review.
+The existing dev ingestion routes create fixtures and therefore do not seed these results.
+
 ## 6. Gate station endpoints [DRAFT; owner Khôi]
 
 - `POST /api/v1/gates` — register/config gate.

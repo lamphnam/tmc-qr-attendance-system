@@ -2,6 +2,10 @@ package vn.edu.hcmut.tmc.attendance;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.sql.Connection;
 import java.time.Instant;
@@ -16,16 +20,20 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import vn.edu.hcmut.tmc.attendance.domain.model.AttendanceHistoryPage;
+import vn.edu.hcmut.tmc.attendance.application.service.AttendanceHistoryService;
 import vn.edu.hcmut.tmc.attendance.domain.model.AttendanceHistoryQuery;
 import vn.edu.hcmut.tmc.attendance.domain.model.AttendanceRecord;
 import vn.edu.hcmut.tmc.attendance.domain.model.Direction;
 import vn.edu.hcmut.tmc.attendance.domain.model.ScanResult;
 import vn.edu.hcmut.tmc.attendance.infrastructure.persistence.PostgresAttendanceHistoryQuery;
+import vn.edu.hcmut.tmc.attendance.presentation.controller.DevAttendanceHistoryController;
 
 /** Real PostgreSQL with the canonical schema; no H2 substitute and no duplicated DDL. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -186,5 +194,50 @@ class AttendanceHistoryPostgresIntegrationTest {
 
         assertThat(page("EMP001", "BD", Integer.MAX_VALUE, 100).events()).isEmpty();
         assertThatThrownBy(() -> history.find(null)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void devHttpQueryUsesRealServiceAndPostgresFilteringBoundariesAndStablePages() throws Exception {
+        insert(3, "EMP001", "BD", FROM.plusMillis(1), ScanResult.REJECTED, false);
+        insert(2, "EMP001", "BD", FROM, ScanResult.ALLOWED, false);
+        insert(1, "EMP001", "BD", FROM, ScanResult.ALLOWED, false);
+        insert(4, "EMP001", "LA", FROM, ScanResult.ALLOWED, false);
+        insert(5, "EMP002", "BD", FROM, ScanResult.ALLOWED, false);
+        insert(6, "EMP001", "BD", FROM.minusMillis(1), ScanResult.ALLOWED, false);
+        insert(7, "EMP001", "BD", TO, ScanResult.ALLOWED, false);
+        insert(8, "EMP001", "BD", FROM, ScanResult.ALLOWED, true);
+        MockMvc mvc = historyMvc();
+
+        mvc.perform(get("/api/dev/attendance/history").param("employeeId", "EMP001").param("factoryId", "BD")
+                        .param("fromInclusive", FROM.toString()).param("toExclusive", TO.toString())
+                        .param("page", "0").param("size", "2"))
+                .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.events.length()").value(2))
+                .andExpect(jsonPath("$.events[0].attendanceId").value(id(1).toString()))
+                .andExpect(jsonPath("$.events[1].attendanceId").value(id(2).toString()))
+                .andExpect(jsonPath("$.hasNext").value(true));
+        mvc.perform(get("/api/dev/attendance/history").param("employeeId", "EMP001").param("factoryId", "BD")
+                        .param("fromInclusive", FROM.toString()).param("toExclusive", TO.toString())
+                        .param("page", "1").param("size", "2"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.events.length()").value(1))
+                .andExpect(jsonPath("$.events[0].attendanceId").value(id(3).toString()))
+                .andExpect(jsonPath("$.events[0].scanResult").value("REJECTED"))
+                .andExpect(jsonPath("$.hasNext").value(false));
+    }
+
+    @Test
+    void devHttpQueryReturnsAnEmptyPageWhenOnlyFixturesExist() throws Exception {
+        insert(1, "EMP001", "BD", FROM, ScanResult.ALLOWED, true);
+
+        historyMvc().perform(get("/api/dev/attendance/history").param("employeeId", "EMP001").param("factoryId", "BD")
+                        .param("fromInclusive", FROM.toString()).param("toExclusive", TO.toString()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.events").isEmpty())
+                .andExpect(jsonPath("$.hasNext").value(false));
+    }
+
+    private MockMvc historyMvc() {
+        return MockMvcBuilders.standaloneSetup(
+                new DevAttendanceHistoryController(new AttendanceHistoryService(history))).build();
     }
 }

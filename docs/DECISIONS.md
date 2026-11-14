@@ -71,6 +71,7 @@ Added 2026-11-01 by the scaffold. Nothing here changes [BASELINE-M1] (4 services
 Canonical list. Quote these instead of re-deriving them, and never contradict them in the report (policy: [PROJECT §5](PROJECT.md#5-claims-policy-canonical--other-docs-link-here)).
 
 - **Security is incomplete.** Dev traffic is plain HTTP. Employee QR/lifecycle/audit endpoints lack JWT/RBAC, actor metadata is untrusted, and services share a dummy DB owner credential. The dev whitelist checks a shared kiosk API key without factory authorization. Kiosk whitelist material has local AES-256-GCM protection; Central `shared_secret` contains plaintext synthetic dev values only, with public dummy seed secrets. TLS 1.3, mTLS, Central encryption at rest and MFA remain unimplemented. This does not satisfy NFR-4 as a whole.
+- **Dev attendance history is unauthenticated.** The profile-gated history route accepts factory as a filter only; it provides no access control. Use synthetic records on a trusted developer machine. There is no production History GET route or approved production history authorization contract.
 - **Data durability.** SQLite WAL + `synchronous=FULL` protects against a process crash or restart, not against a physical disk failure, and depends on the filesystem. "Zero data loss" must not be claimed.
 - **Offline revocation is not instant.** A kiosk keeps a stale whitelist until its next sync. A compromised kiosk exposes the secrets of the employees assigned to it.
 - **Anti-replay is per kiosk.** `(employee_id, matched_time_step)` cannot stop reuse across kiosks while disconnected.
@@ -104,3 +105,12 @@ This implements transport, not `IWhitelistSnapshotSource` or HTTP whitelist sync
 ## Independent mapping and conditional composition (2026-11-14)
 
 The requested preparation adds wire-to-domain employee mapping using the exact UTF-8 encoding of the String; it does not decode the base64-looking text used by Central. Missing/blank HTTP secrets and unsupported wire statuses remain invalid, without changing the domain's separate nullable-material policy. No source metadata or version is created. Composition prepares a default singleton only when an existing source port bean is registered; without one, transport/mapper/cache still start independently, including with no HTTP key. No source placeholder, scheduler or HTTP write path is provided. A future source must supply valid authenticated scope/revision and be registered before conditional wiring is evaluated. D01/D04/D08 remain open; API/schema and version semantics are unchanged. Details: [mapping and wiring](../kiosk-agent/README.md#employee-mapping-and-conditional-wiring).
+
+## Dev attendance history boundary (2026-11-14)
+
+At the attendance owner's explicit request, a dev-only GET controller reuses the existing history service/read port
+and PostgreSQL query without changing ingestion, idempotency or schema. Since no production history contract exists,
+the minimal dev wire shape is recorded separately in [API-CONTRACTS](API-CONTRACTS.md#dev-only-attendance-history-draft).
+It keeps the existing non-fixture policy and bounded, stable half-open-range query; no aggregation or reporting-service work is added.
+The module remains DEV_SLICE. Factory filtering is not authorization; no mock authentication or production GET route is added.
+Production history identity/roles/scope and the cross-module contract remain open for owner review (D01/D04).

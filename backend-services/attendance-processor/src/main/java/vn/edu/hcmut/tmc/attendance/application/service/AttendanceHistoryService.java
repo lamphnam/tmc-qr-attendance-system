@@ -9,7 +9,7 @@ import vn.edu.hcmut.tmc.attendance.domain.model.AttendanceHistoryPage;
 import vn.edu.hcmut.tmc.attendance.domain.model.AttendanceHistoryQuery;
 import vn.edu.hcmut.tmc.attendance.domain.repository.IAttendanceHistoryQuery;
 
-/** Application boundary for validated history requests; endpoint and authorization remain unimplemented. */
+/** Application boundary for validated history requests; callers remain responsible for scope authorization. */
 @Service
 public class AttendanceHistoryService {
 

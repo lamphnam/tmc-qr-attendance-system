@@ -58,6 +58,16 @@ class AttendanceProcessorApplicationTest {
     }
 
     @Test
+    void historyHttpQueryAgainstAnUnreachableDatabaseReturns503() throws Exception {
+        mvc.perform(get("/api/dev/attendance/history").param("employeeId", "EMP001").param("factoryId", "BD")
+                        .param("fromInclusive", "2026-11-14T01:00:00Z")
+                        .param("toExclusive", "2026-11-14T01:01:00Z"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("STORAGE_UNAVAILABLE"))
+                .andExpect(jsonPath("$.events").doesNotExist());
+    }
+
+    @Test
     void devIngestionAnswers503WhenCentralDatabaseIsUnreachable() throws Exception {
         mvc.perform(post("/api/dev/attendance/events").contentType(MediaType.APPLICATION_JSON).content("""
                         {"attendanceId":"c5b0ff1a-2c59-4333-ac72-1b41b84e84a1","employeeId":"EMP001","factoryId":"BD",

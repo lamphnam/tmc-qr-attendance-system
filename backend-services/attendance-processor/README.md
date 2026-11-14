@@ -10,9 +10,36 @@ Central, idempotent, ACID ingestion of attendance events (ADR-01). The **ingesti
 | `POST /api/dev/attendance/events` | **DEV-ONLY**, unauthenticated, `dev` profile only. One event, ack after commit |
 | `POST /api/dev/attendance/sync` | **DEV-ONLY**. Batch with a per-event ack: `STORED` / `ALREADY_EXISTS` / `RETRYABLE` / `REJECTED_PERMANENT` |
 | `GET /api/dev/attendance/events/{id}` | **DEV-ONLY** read-back |
+| `GET /api/dev/attendance/history` | **DEV-ONLY**, unauthenticated history query; see below |
 | `GET /actuator/health` | ready only while PostgreSQL answers (`db` component) |
 
 Rows written through the dev routes have `dev_fixture = true` so reports can exclude them.
+
+## Dev attendance history
+
+Only profile `dev` registers `GET /api/dev/attendance/history`. Example with synthetic data:
+
+```text
+/api/dev/attendance/history?employeeId=EMP001&factoryId=BD&fromInclusive=2026-11-14T01:00:00Z&toExclusive=2026-11-14T02:00:00Z&page=0&size=20
+```
+
+The mandatory employee/factory filters and half-open time range are passed to the existing query service.
+Times require an ISO-8601 instant with a timezone and millisecond precision or coarser.
+Pagination is zero-based, defaults to page 0 / size 20, and accepts sizes 1..100.
+The response contains `events` (the existing attendance event DTO), `page`, `size`, and `hasNext`.
+Events sort by `occurredAt ASC, attendanceId ASC`; no total count or consistent snapshot across separate pages is promised.
+Both ALLOWED and REJECTED facts are included; `dev_fixture=true` rows are excluded even on this dev route.
+Consequently, events created through the existing dev ingestion endpoints do not populate this history.
+Use synthetic non-fixture rows in an isolated dev database to exercise it; no fixture-inclusion bypass is provided.
+
+Invalid/missing parameters return 400 `VALIDATION_ERROR`; storage failures return 503 `STORAGE_UNAVAILABLE`,
+never an empty successful page. Responses carry `X-TMC-Dev-Only: true` and `Cache-Control: no-store`.
+The wire details are recorded as a [dev-only DRAFT](../../docs/API-CONTRACTS.md#dev-only-attendance-history-draft).
+
+**Security limit:** there is no authentication or factory authorization. Any caller reaching this dev endpoint
+can select any factory; `factoryId` is only a SQL filter. Enable it only on a trusted developer machine
+with synthetic records. Do not enable the dev profile against real employee data.
+No production History GET route is registered. Production identity, roles and authorized factory scope require team agreement.
 
 ## How idempotency works
 1. The kiosk creates `attendanceId` **once**, at scan time.
@@ -23,4 +50,4 @@ Rows written through the dev routes have `dev_fixture = true` so reports can exc
 `occurredAt` is compared at millisecond precision (DECISIONS B06). `Idempotency-Key` is not used for dedupe in this slice; `attendanceId` is.
 
 ## Tests
-`mvn test` runs unit tests (fake repository), the WebMvc contract, ArchUnit layering and `AttendanceIdempotencyPostgresIntegrationTest`, which starts **real PostgreSQL 16 through Testcontainers** and loads the real `init-db/schema.sql`. It is **skipped, not faked, without Docker** — check the surefire "Skipped" count.
+`mvn test` runs unit tests (fake repository), WebMvc validation/profile tests, ArchUnit layering and the history/idempotency PostgreSQL integration suites. Testcontainers starts **real PostgreSQL 16** and loads the canonical `init-db/schema.sql`; the history suite also exercises HTTP → service → PostgreSQL. These suites are **skipped, not faked, without Docker** — check the surefire "Skipped" count.
