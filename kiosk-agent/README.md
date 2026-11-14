@@ -6,7 +6,9 @@ Offline-first edge agent. The **durable SQLite queue and the store-and-forward s
 
 The local whitelist domain and SQLite snapshot store are implemented, including AES-256-GCM protection of non-null verification material (D08). HTTP whitelist synchronization, TOTP and scan integration remain unimplemented; this does not change the DEV_SLICE label.
 
-`SyncWhitelistUseCase` implements application orchestration through the new `IWhitelistSnapshotSource` domain port; it has no HTTP adapter, trigger or automatic Spring registration yet. See [application boundary](#whitelist-sync-application-boundary) below.
+`SyncWhitelistUseCase` implements application orchestration through the new `IWhitelistSnapshotSource` domain port; it has no complete HTTP snapshot-source adapter, trigger or automatic Spring registration yet. See [application boundary](#whitelist-sync-application-boundary) below.
+
+`WhitelistHttpTransport` now implements explicit HTTP fetching/validation of Central's current employee array. It is an Infrastructure-only component, not an `IWhitelistSnapshotSource` implementation; no call is automatically triggered and no data reaches SQLite. See [HTTP transport](#whitelist-http-transport-only).
 
 | Route | Status |
 |---|---|
@@ -63,3 +65,17 @@ An atomic non-reentrant guard covers download through persistence completion; a 
 Reports carry only status and an optional version, with no employee, key, ciphertext or upstream exception text. Expected source errors use the existing `CentralUnavailableException` or `IllegalArgumentException`; model constructors also reject malformed data. Unexpected programming failures propagate, with the running guard still released. Central is scripted in `SyncWhitelistUseCaseTest`; real SQLite and AES verify cache preservation, encrypted commit failure and fetch/commit races. This is not an HTTP or end-to-end whitelist test.
 
 Khoa/Khánh still need to settle remote response mapping, trusted factory/kiosk scope, authentication/transport, secret encoding, version semantics and any unchanged-response behavior before building the real source adapter. This local port does not amend the HTTP contract or prescribe a JSON field, endpoint or secret representation.
+
+## Whitelist HTTP transport only
+
+`WhitelistHttpTransport.fetchEmployees()` sends a single GET to the existing `/api/v1/kiosk/whitelist` with `factoryId` taken only from trusted `KioskIdentity`. It reuses `centralRestClient` and its existing connect/read timeouts (`1000`/`3000` ms by default). The credential is attached only to the whitelist request, not the shared client's default headers; redirects and retries are not added. There is no scheduler, startup fetch, use-case invocation or storage dependency.
+
+Configure `KIOSK_API_KEY`, mapped to `kiosk.whitelist.api-key`. Compose forwards the environment value to the kiosk with an empty default; outside Compose provide it directly to the process. The existing `.env.example` contains a clearly synthetic dev credential for Central. No credential is generated or borrowed from `KIOSK_WHITELIST_KEY_BASE64`, which remains exclusively the local AES encryption key. Missing/blank HTTP credentials permit queue-only startup but fail before sending any request. Credential configuration is kept out of records with generated `toString()` methods.
+
+Only HTTP 200 with JSON array data succeeds, including `[]`. Every row must have all eight current DTO fields with correct JSON types, ACTIVE/REVOKED status, positive integer `secretVersion`, valid Instant `updatedAt`, nonblank ID/material and the configured factory. Duplicate IDs (including IDs that would collide after existing domain whitespace normalization), duplicate JSON fields, trailing JSON or invalid rows reject the entire response; invalid rows are never silently dropped. Extra unknown fields are ignored. Names/department remain strings; no new business validation or secret encoding is invented.
+
+The result is an immutable list of redacted `WhitelistEmployeeWireDto` records. `sharedSecret` remains the exact String supplied by Central, with no Base32/Base64 decoding, trimming or domain conversion. No snapshot/global version, expiry or TTL is calculated. These DTOs contain sensitive material in memory and must never be used as employee/browser response DTOs.
+
+Failures use `WhitelistHttpException` with fixed messages, a reason and an optional non-200 HTTP status: `MISSING_CREDENTIAL`, `INVALID_CONFIGURATION`, `HTTP_ERROR`, `UNAVAILABLE`, `INVALID_RESPONSE`. No upstream body, credential or HTTP/Jackson exception cause is logged or attached. The new code does not log requests/payloads; header and body timeout tests use the production JDK client over loopback. The transport itself has no dependency on Application's `CentralSyncSwitch`; offline orchestration remains with the existing use case when a real source adapter can be integrated.
+
+Central still lacks global snapshot revision and authenticated kiosk/factory binding, particularly for empty arrays. A successful transport result therefore is not proof of an authoritative, newer snapshot. Wait for revision/scope/material agreement before implementing the source adapter, wiring it to `SyncWhitelistUseCase`, scheduling it or writing to SQLite. HTTP transport tests use loopback/mock servers, not a running Central or a cross-service integration test.

@@ -162,3 +162,15 @@ Lượt này chỉ hợp nhất nội dung tài liệu của hai branch và ki�
 | `node scripts/check-docs.mjs` | 0 | Link và anchor hợp lệ, không cảnh báo dòng trùng |
 
 Merge vẫn đang chờ người dùng review; chưa stage file hoặc tạo merge commit. Vì giữ nguyên index, Git vẫn báo ba file unmerged dù marker trong working tree đã được xử lý.
+
+## 10. Whitelist HTTP Transport tại Kiosk (2026-11-14)
+
+Snapshot làm việc bắt đầu từ merge commit `1dfc793`. Chỉ hoàn thành transport/DTO Infrastructure và cấu hình credential; không có snapshot-source implementation, scheduler, wiring vào use case hoặc ghi cache. Nhãn kiosk vẫn **DEV_SLICE**. Chi tiết sử dụng/giới hạn: [HTTP transport](../kiosk-agent/README.md#whitelist-http-transport-only).
+
+| Lệnh | Exit | Kết quả đo trong lượt transport |
+|---|---|---|
+| `mvn -B -ntp -pl kiosk-agent -Dtest=WhitelistHttpTransportTest,WhitelistHttpConfigTest test` | 0 | 71 PASS: HTTP 69, configuration 2; 0 FAIL/ERROR/SKIP |
+| `mvn -B -ntp -pl kiosk-agent test` | 0 | 232 PASS, 0 FAIL/ERROR/SKIP; gồm 71 test mới và regression queue/sync |
+| `mvn -B -ntp -Dtest=*ArchitectureTest test` | 0 | 13 PASS, 0 FAIL/ERROR/SKIP trong 5 module; 3 Kiosk tests đã nằm trong tổng trên |
+
+Chạy trên JDK 23.0.1 / compiler release 21. HTTP dùng loopback server và client timeout thực; configuration test dùng Spring HTTP mock. Đã đo các nhánh 200/empty, non-200, timeout header/body, mất kết nối, malformed/missing/null/duplicate data, sai factory, credential chỉ trên request whitelist và thông báo lỗi không lộ fixture nhạy cảm. Không cần Central/Docker thực chạy; không gọi API khi khởi động. Không chạy lại PostgreSQL integration hoặc toàn bộ tests backend trong lượt này. Snapshot revision, authenticated scope và tích hợp với `SyncWhitelistUseCase` vẫn chờ contract Khoa/Khánh.

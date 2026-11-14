@@ -14,6 +14,8 @@ kiosk:
   # Gate used by the dev-only synthetic event when the request does not name one.
   default-gate-id: ${KIOSK_DEFAULT_GATE_ID:BD-G01}
   whitelist:
+    # HTTP credential only; distinct from the local SQLite encryption key below.
+    api-key: ${KIOSK_API_KEY:}
     # External AES-256 key only; no default key and never stored in the SQLite volume.
     secret-key-base64: ${KIOSK_WHITELIST_KEY_BASE64:}
   sqlite:
