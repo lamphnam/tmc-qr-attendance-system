@@ -6,6 +6,8 @@ Offline-first edge agent. The **durable SQLite queue and the store-and-forward s
 
 The local whitelist domain and SQLite snapshot store are implemented, including AES-256-GCM protection of non-null verification material (D08). HTTP whitelist synchronization, TOTP and scan integration remain unimplemented; this does not change the DEV_SLICE label.
 
+`SyncWhitelistUseCase` implements application orchestration through the new `IWhitelistSnapshotSource` domain port; it has no HTTP adapter, trigger or automatic Spring registration yet. See [application boundary](#whitelist-sync-application-boundary) below.
+
 | Route | Status |
 |---|---|
 | `POST /api/local/scan` | **NOT_IMPLEMENTED** (501). Never returns ALLOWED |
@@ -38,3 +40,26 @@ An absent/blank key permits queue-only startup and snapshots with no secret mate
 Encryption occurs inside the existing `BEGIN IMMEDIATE` snapshot replacement; employees and metadata commit together, and failure rolls back the replacement. Reads decrypt inside the existing consistent read transaction. Temporary plaintext copies obtained from the domain accessor and from decryption are cleared after use; the domain retains its defensive copy. This does not guarantee erasure of all JVM/provider memory copies.
 
 The envelope is a **local storage format**, not a Central HTTP encoding. Material stays `byte[]`; Central encoding, provisioning/key custody, multi-key rotation/migration and offline revocation policy still need owner agreement. Existing opaque/plaintext BLOBs are never interpreted as legacy secrets. GCM authenticates present encrypted material and its context, not the whole database: it cannot detect a coordinated database rollback or distinguish a removed BLOB (SQL NULL) from legitimately absent material. This also does not protect against a compromised kiosk process holding the key.
+
+## Whitelist sync application boundary
+
+The framework-free `SyncWhitelistUseCase` receives `IWhitelistSnapshotSource`, `IWhitelistSnapshotStore`, `CentralSyncSwitch`, `KioskIdentity` and `Clock` through its constructor. `IKioskSyncAPI` and Attendance Sync are unchanged. Once an actual source adapter exists, the composition root must create **one shared use-case instance per kiosk** using the existing switch, identity and Clock beans. No unavailable/no-op Central bean is supplied merely to make wiring succeed; the current application continues booting without the new source.
+
+One `run()` fetches a full snapshot outside the store, validates kiosk/factory scope, and assigns local `cachedAt` from the injected Clock after retrieval. The source timestamp is provisional, not a Central freshness claim. The immutable domain models validate version/count/employee invariants; the store compares versions atomically under its existing write lock. An equal/older version does not refresh metadata. A valid empty snapshot initializes/clears the cache, including version zero when uninitialized. No TTL, network retry schedule or rotation policy is added.
+
+An atomic non-reentrant guard covers download through persistence completion; a concurrent or recursive call returns immediately. It protects callers sharing that use-case instance, not separate instances/processes. Offline is checked before fetching and again before storage. Switching offline during a fetch discards a valid candidate; an already-started fetch/transaction is not forcibly cancelled. A future adapter must enforce its own bounded network waits.
+
+| `WhitelistSyncReport.status` | Meaning |
+|---|---|
+| `UPDATED` | Store returned true after durable commit; report includes committed version |
+| `NOT_NEWER` | Store rejected an equal/older candidate; report includes candidate version, which may differ from the current stored version |
+| `OFFLINE` | Central synchronization disabled; no new persistence call |
+| `ALREADY_RUNNING` | Another pass is active on this use-case instance |
+| `SOURCE_UNAVAILABLE` | Source port reported unavailable Central/timeout |
+| `INVALID_SNAPSHOT` | Source data rejected, null result, scope mismatch or invalid store input |
+| `CACHE_UNAVAILABLE` | Persistence/material recovery/encryption/commit unavailable |
+| `INVALID_CACHE` | Existing cache integrity failure; no automatic reset |
+
+Reports carry only status and an optional version, with no employee, key, ciphertext or upstream exception text. Expected source errors use the existing `CentralUnavailableException` or `IllegalArgumentException`; model constructors also reject malformed data. Unexpected programming failures propagate, with the running guard still released. Central is scripted in `SyncWhitelistUseCaseTest`; real SQLite and AES verify cache preservation, encrypted commit failure and fetch/commit races. This is not an HTTP or end-to-end whitelist test.
+
+Khoa/Khánh still need to settle remote response mapping, trusted factory/kiosk scope, authentication/transport, secret encoding, version semantics and any unchanged-response behavior before building the real source adapter. This local port does not amend the HTTP contract or prescribe a JSON field, endpoint or secret representation.

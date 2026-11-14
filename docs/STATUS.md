@@ -99,3 +99,17 @@ Môi trường thực chạy: JDK 23.0.1, compiler release 21, Maven 3.9.16. Kh�
 | `git diff --check` | 0 | Không lỗi whitespace |
 
 Test thực dùng AES-GCM/JCE và SQLite file: round-trip/reopen, nonce mới, sai/thiếu khóa, sửa envelope/ngữ cảnh, rollback khi lỗi mã hóa hoặc transaction, đọc nhất quán khi writer commit, giữ nguyên attendance queue/used_tokens/metadata khác. Không chạy lại PostgreSQL integration trong lượt D08 này; các module backend không đổi. Cảnh báo khởi tạo bean trong test khóa không hợp lệ là nhánh lỗi chủ động kiểm tra, chỉ có thông báo cố định an toàn.
+
+## 7. Whitelist Sync Application Core (2026-11-14)
+
+Đã thêm `IWhitelistSnapshotSource`, `SyncWhitelistUseCase` và `WhitelistSyncReport`; [class map](TRACEABILITY.md#kiosk-agent-khánh) và [ranh giới tích hợp](../kiosk-agent/README.md#whitelist-sync-application-boundary) mô tả phần thực có. Nhãn kiosk vẫn **DEV_SLICE**, không đổi dashboard. Chưa có HTTP adapter, scheduler hoặc bean Whitelist Sync tự chạy; không thay đổi Attendance Sync, schema hay API contract.
+
+| Lệnh | Exit | Kết quả thực chạy |
+|---|---|---|
+| `mvn -B -ntp -pl kiosk-agent -Dtest=SyncWhitelistUseCaseTest test` | 0 | 23 PASS, 0 FAIL/ERROR/SKIP; Central được script, SQLite/AES thật |
+| `mvn -B -ntp -pl kiosk-agent test` | 0 | 161 PASS, 0 FAIL/ERROR/SKIP; gồm 23 test mới và 3 Kiosk ArchUnit tests |
+| `mvn -B -ntp -Dtest=*ArchitectureTest test` | 0 | 11 PASS, 0 FAIL/ERROR/SKIP trong 5 module; không cộng lặp 3 Kiosk tests vào tổng trên |
+| `git diff --check` | 0 | Không lỗi whitespace |
+| `node scripts/check-docs.mjs` | 0 | Link tài liệu hợp lệ, không cảnh báo dòng trùng |
+
+Môi trường vẫn JDK 23.0.1 / compiler release 21. Test bao phủ offline trước/trong fetch, scope sai, dữ liệu không hợp lệ, version cũ/bằng và version zero, snapshot rỗng, timeout/failure, chống sync chồng trong fetch/commit và gọi đệ quy, writer khác cập nhật trong lúc tải, reopen, thiếu khóa, cache hỏng và commit failure rollback. `UPDATED` chỉ xuất hiện sau durable commit; kết quả không chứa dữ liệu nhân viên hoặc exception text. Một lần chờ công cụ bị timeout dù log Maven đã BUILD SUCCESS; đã chạy lại để xác nhận exit 0, lưu log/mã thoát trong `kiosk-agent/target/whitelist-sync-tests.*`. Chưa kiểm chứng HTTP Whitelist của Central hoặc triển khai nhiều process; guard yêu cầu dùng chung một use-case instance trong kiosk.
