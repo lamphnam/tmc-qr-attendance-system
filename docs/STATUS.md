@@ -245,3 +245,28 @@ Các lượt SKIP ở §12 được giữ nguyên; không cộng số test giữ
 Phạm vi nghiệm thu: HTTP/service/PostgreSQL của module đã kiểm chứng; chưa chạy lại toàn stack Kiosk/gateway
 trên snapshot bàn giao. Nam cần xác nhận kịch bản tích hợp và dữ liệu reporting; Khoa/Khánh cùng Khôi cần chốt
 auth, scope và event/ACK contract trước khi mở production. Hướng dẫn: [README nghiệm thu](../backend-services/attendance-processor/README.md#dev-handoff-acceptance).
+
+## 14. Kiosk HTTP snapshot source (2026-11-14)
+
+Bắt đầu từ `0a133e9`; Kiosk vẫn **DEV_SLICE**, không đổi nhãn dashboard. Theo contract người dùng xác nhận đã
+thống nhất với Khoa, adapter đọc `X-Whitelist-Version` dương kiểu long từ cùng response với JSON array.
+Chi tiết parsing, scope và lỗi: [Kiosk README](../kiosk-agent/README.md#http-snapshot-source-not-activated).
+
+Đã có `RestWhitelistSnapshotSource`, chưa đăng ký bean, chưa kích hoạt use case/scheduler hoặc ghi cache từ HTTP.
+Central revision implementation không được giả định đã merge; chỉ mock/loopback được kiểm chứng, chưa có test với
+Central thật. SQLite/AES, version guard, Attendance Sync và scan/TOTP/anti-replay/turnstile không thay đổi.
+
+| Lệnh | Exit | PASS | FAIL | ERROR | SKIP |
+|---|---:|---:|---:|---:|---:|
+| `mvn -B -ntp -pl kiosk-agent -Dtest=RestWhitelistSnapshotSourceTest,WhitelistHttpTransportTest,WhitelistHttpConfigTest,WhitelistSyncWiringConfigTest test` | 0 | 133 | 0 | 0 | 0 |
+| `mvn -B -ntp -pl kiosk-agent test` | 0 | 311 | 0 | 0 | 0 |
+| `mvn -B -ntp -Dtest=*ArchitectureTest test` | 0 | 13 | 0 | 0 | 0 |
+| `node scripts/check-docs.mjs` | 0 | — | — | — | — |
+| `git diff --check` | 0 | — | — | — | — |
+
+58 test mới của adapter kiểm tra revision, dữ liệu/scope/empty, UTF-8, lỗi HTTP/timeout/credential và redaction.
+69 transport tests cũ giữ nguyên và PASS, gồm timeout header/body qua HTTP thật trên loopback. Wiring tests tiếp tục
+xác nhận cấu hình hiện tại không cung cấp source bean. Các lượt focused là tập con, không cộng vào tổng Kiosk.
+Môi trường JDK 23.0.1 / compiler release 21, Maven 3.9.16. Log/exit code: `kiosk-agent/target/whitelist-source-*`.
+ArchUnit toàn hệ thống gồm 3 Kiosk tests đã nằm trong tổng 311; không cộng lặp. Link/anchor tài liệu hợp lệ,
+không cảnh báo dòng trùng hoặc lỗi whitespace. Không sửa luật ArchUnit, API contract hay code Central.

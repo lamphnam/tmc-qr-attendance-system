@@ -114,3 +114,16 @@ the minimal dev wire shape is recorded separately in [API-CONTRACTS](API-CONTRAC
 It keeps the existing non-fixture policy and bounded, stable half-open-range query; no aggregation or reporting-service work is added.
 The module remains DEV_SLICE. Factory filtering is not authorization; no mock authentication or production GET route is added.
 Production history identity/roles/scope and the cross-module contract remain open for owner review (D01/D04).
+
+## Kiosk HTTP snapshot adapter boundary (2026-11-14)
+
+The user reports Khoa's agreement on a positive long `X-Whitelist-Version`, monotonically increasing per factory
+and covering all whitelist membership/secret/status changes, with the existing array body and exact UTF-8 material.
+Kiosk now implements that mapping in an explicitly constructed `RestWhitelistSnapshotSource`, without changing
+the canonical API document, Central code or schema in this task. Earlier transport/core entries above record the
+state before that agreement; they do not describe the latest adapter availability.
+
+No real source bean, scheduler or HTTP-to-cache path is activated. The existing version guard, SQLite transactions
+and AES-GCM remain unchanged. Configured identity and factory row checks are not authorization: the dev key is still
+not factory-bound. Central must return a complete factory view and revision consistently, including an empty view;
+its actual implementation and end-to-end integration remain unverified here. See [Kiosk source boundary](../kiosk-agent/README.md#http-snapshot-source-not-activated).

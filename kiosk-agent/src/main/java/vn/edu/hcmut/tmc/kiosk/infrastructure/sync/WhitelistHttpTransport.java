@@ -23,7 +23,7 @@ import vn.edu.hcmut.tmc.kiosk.domain.model.KioskIdentity;
 import vn.edu.hcmut.tmc.kiosk.infrastructure.sync.WhitelistHttpException.Reason;
 
 /**
- * Explicit, single-request transport for Central's current employee array. It owns no cache or source revision,
+ * Explicit, single-request transport for Central's employee array and optional source-version header. It owns no cache,
  * implements no domain source port, and never contacts Central at construction/startup. Offline orchestration
  * remains in Application; the shared client supplies connect/read timeouts.
  */
@@ -54,6 +54,17 @@ public final class WhitelistHttpTransport {
      *                                only a fixed reason and optional HTTP status escape, never an upstream cause
      */
     public List<WhitelistEmployeeWireDto> fetchEmployees() {
+        return fetchSnapshotResponse().employees();
+    }
+
+    /**
+     * Captures all X-Whitelist-Version values and the fully validated array from the same HTTP response.
+     * Header interpretation belongs to the snapshot source; the legacy employee-only operation needs no revision.
+     * factoryId identifies the configured request filter, not a factory authorization asserted by Central.
+     *
+     * @throws WhitelistHttpException with the same safe failure contract as fetchEmployees
+     */
+    public SnapshotResponse fetchSnapshotResponse() {
         if (apiKey == null || apiKey.isBlank()) {
             throw new WhitelistHttpException(Reason.MISSING_CREDENTIAL);
         }
@@ -75,7 +86,8 @@ public final class WhitelistHttpTransport {
                             throw new WhitelistHttpException(Reason.INVALID_RESPONSE);
                         }
                         try {
-                            return parse(reader.readTree(response.getBody()));
+                            return new SnapshotResponse(factoryId, response.getHeaders().getOrEmpty("X-Whitelist-Version"),
+                                    parse(reader.readTree(response.getBody())));
                         } catch (com.fasterxml.jackson.core.JacksonException | IllegalArgumentException
                                 | DateTimeException invalidData) {
                             throw new WhitelistHttpException(Reason.INVALID_RESPONSE);
@@ -124,6 +136,20 @@ public final class WhitelistHttpTransport {
             throw new WhitelistHttpException(Reason.INVALID_RESPONSE);
         }
         return value.textValue();
+    }
+
+    /** Sensitive response data, deliberately not a domain snapshot or a claim of authenticated scope. */
+    public record SnapshotResponse(String factoryId, List<String> versionHeaders, List<WhitelistEmployeeWireDto> employees) {
+
+        public SnapshotResponse {
+            versionHeaders = List.copyOf(versionHeaders);
+            employees = List.copyOf(employees);
+        }
+
+        @Override
+        public String toString() {
+            return "WhitelistHttpTransport.SnapshotResponse[<redacted>]";
+        }
     }
 
     @Override
