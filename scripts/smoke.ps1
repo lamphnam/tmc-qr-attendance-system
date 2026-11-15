@@ -114,6 +114,8 @@ Expect 'unknown service probe is a JSON 404'               GET "$Gateway/service
 Write-Host '[6] dev-only fixtures exist ONLY because the dev profile is on'
 Expect 'central dev ingestion rejects an empty event' POST "$Gateway/api/dev/attendance/events" 400 '"code":"VALIDATION_ERROR"' '{}'
 Expect 'kiosk dev queue readable'                     GET  "$Gateway/api/dev/kiosk/queue"      200 '"counts"'
+Expect 'reporting dev dashboard reads PostgreSQL'     GET  "$Gateway/api/dev/reports/dashboard?factoryId=BD" 200 '"timeZone":"Asia/Ho_Chi_Minh"'
+Expect 'reporting dev export refuses an unfinished month' POST "$Gateway/api/dev/reports/hr-export/trigger" 400 '"code":"INVALID_REQUEST"' '{"period":"2999-12"}'
 
 Write-Host ''
 if ($script:Fails -eq 0) {

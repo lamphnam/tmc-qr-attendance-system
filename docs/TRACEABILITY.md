@@ -13,20 +13,20 @@ The evidence column is filled only with things that exist and ran (2026-11-01). 
 | FR-2.1 / 2.2 | Gate station, manual open, audit | Khôi/Khoa | guard role / manual gate | NOT_IMPLEMENTED | `GateStationController` routes answer 501 |
 | FR-3.1 | Kiosk + SQLite + Processor | Khánh/Khôi | scan → ack → idempotency | DEV_SLICE | queue + sync + turnstile only; `POST /api/local/scan` answers 501 (`KioskAgentApplicationTest`). See ADR-01 rows |
 | FR-3.2 | Reporting + UI | Nam/Khiêm | employee history authorization | NOT_IMPLEMENTED | — |
-| FR-4.1 / 4.2 | Reporting service | Nam | filtered factory report & dashboard | NOT_IMPLEMENTED | `ReportingController` routes answer 501 |
+| FR-4.1 / 4.2 | Reporting service | Nam | filtered factory report & dashboard | DEV_SLICE | `ReportQueryService` + `PostgresAttendanceReportReader` via dev-only `/api/dev/reports/attendance` and `/dashboard`: factory day in Asia/Ho_Chi_Minh, department ("team") totals, ALLOWED-only, fixtures excluded → `ReportingPostgresIntegrationTest.theReportGroupsByVietnameseDayJoinsDepartmentsAndCountsOnlyAcceptedRealScans`, `theDashboardCountsOneFactoryDayAndShowsTheLatestExport`. Missing: authentication/roles, **shift** dimension (no shift data in M1), production `/api/v1/reports/*` (501) |
 | FR-5.1 | JWT / RBAC | Khoa | per-role endpoint authorization | NOT_IMPLEMENTED | tables `roles`, `users`, `user_roles` only |
 | FR-5.2 | Configuration | Khoa/Khôi | reload / bounds | NOT_IMPLEMENTED | — |
 | NFR-1 | Kiosk fast path | Khánh/Nam | 800/30 min + p95/p99 | NOT_MEASURED | no real scan path exists yet |
 | NFR-2 | SQLite WAL + direct sync | Khánh/Khôi/Nam | 20 offline + restart + lost ack | DEV_SLICE | `slice.test.mjs` "central really DOWN and a kiosk RESTART" (1 event, process restart); `SQLiteAttendanceRepositoryTest.pendingEventSurvivesReopeningTheDatabaseFile`. **Not** the 20-event T02 scenario, **not** disk failure |
-| NFR-3 | HR batch dedupe | Nam | same Batch_UUID / attendance ids | MOCK | receiver side only: mock HR `node:test` (11) + `slice.test.mjs`; `reporting-service` sends nothing yet |
+| NFR-3 | HR batch dedupe | Nam | same Batch_UUID / attendance ids | DEV_SLICE | sender: one batch per period with `batch_uuid` derived from the period (B24) → `ExportPeriodTest.batchUuidIsDeterministicPerPeriodAndDiffersBetweenPeriods`, `ReportingPostgresIntegrationTest.concurrentTriggersForOneMonthCreateOneBatchAndSendItOnce`, `reporting.test.mjs` (UUID recomputed in Node, `timesReceived` = 1 at the real mock HR); receiver: mock HR `node:test` (11) |
 | NFR-4 | Encryption, MFA, secret handling | Khoa | credential + transport controls | NOT_IMPLEMENTED | — |
 | NFR-5 | Config-driven factory/gate | Khôi/Khánh | add a factory without code | partial | `KioskProperties` / `KioskIdentity` read kiosk id, factory, gate from env; `gates`, `kiosks` tables. No admin API/UI |
-| NFR-6 | Monthly export + retry/alert | Nam | fake-clock schedule + failure | NOT_IMPLEMENTED | `hr_export_*` tables only |
-| NFR-7 | Report query ≤ 30 s | Nam | report on a dataset | NOT_MEASURED | — |
+| NFR-6 | Monthly export + retry/alert | Nam | fake-clock schedule + failure | DEV_SLICE | `ExportSchedule` (01:00 VN, catch-up), `ExportRetryPolicy` (1→30 min, stop at created + 5 h) → `ExportScheduleAndRetryPolicyTest`, `HrExportServiceTest.whenHrStaysDownNoAttemptHappensAfter0600ThenTheBatchFailsAndOneAlertIsRaised`; HR down at the real mock → `reporting.test.mjs` (202, nothing stored). Alert = ERROR log `HR_EXPORT_ALERT` + FAILED batch on the dashboard; no mail/SMS |
+| NFR-7 | Report query ≤ 30 s | Nam | report on a dataset | NOT_MEASURED | queries are bounded (≤ 31 days, ≤ 500 rows, index range on `(factory_id, occurred_at)`) but no latency was measured on a representative dataset |
 | NFR-8 | RBAC, tamper-evident audit | Khoa | app permission + checksum integrity | NOT_IMPLEMENTED | `audit_logs` table only |
 | ADR-01 | Offline + SQLite + direct sync | Khánh/Khôi | offline / restart / retry | DEV_SLICE | commit-before-open: `QueueSyntheticEventUseCaseTest.eventIsCommittedAsPendingBeforeTheGateCommandIsSent` · SYNCED only after ack: `SyncPendingEventsUseCaseTest` (6), `KioskAgentApplicationTest.scanWhileOfflineStaysPendingThenSyncsExactlyOnceAfterReconnect` · central idempotency: `AttendanceIdempotencyPostgresIntegrationTest` (6, real PostgreSQL, incl. 8-thread race), `slice.test.mjs` · offline switch (cuts only kiosk → central): `CentralSyncSwitch` |
 | ADR-02 | TOTP, anti-replay | Khoa/Khánh | replay / revocation / skew | NOT_IMPLEMENTED | `used_tokens`, `whitelist_cache` tables exist, unused |
-| ADR-03 | Monthly HR export | Nam | retry + idempotency + failure notification | NOT_IMPLEMENTED | mock receiver only |
+| ADR-03 | Monthly HR export | Nam | retry + idempotency + failure notification | DEV_SLICE | `HrExportService` (claim / send / record with compare-and-set, lease for crashed attempts) over `IHrPayrollGateway` (`rest`, `file`; shared `HrPayrollGatewayContract`) → `HrExportServiceTest` (15), `ReportingPostgresIntegrationTest` (8), `reporting.test.mjs`. Only via unauthenticated `/api/dev/reports/hr-export/*`; late events are not re-exported (DECISIONS known limitations) |
 | Layering | `presentation → application → domain ← infrastructure` | all | `mvn test` | READY | `*ArchitectureTest` in all 5 Java modules (skeleton services only have `presentation` so far) |
 
 Routes that must answer 501 instead of a fake success are asserted by `scripts/smoke.sh` section 4.
@@ -78,7 +78,19 @@ Names the team proposed in its design trees (companion text files in the `NAM` D
 | `infrastructure/persistence/PostgresAttendanceRepository` | done |
 | *added by the bootstrap* | `DevAttendanceController`, `ApiExceptionHandler`, `IngestionResult`, `domain/exception/*`, `DomainBeansConfig` |
 
-### user-qr-service (Khoa), gate-station-service (Khôi), reporting-service (Nam)
+### reporting-service (Nam)
+
+Package root `vn.edu.hcmut.tmc.reporting`. All classes below exist and are tested (2026-11-15); none is a placeholder.
+
+| Layer | Classes |
+|---|---|
+| presentation | `ReportingController` (production routes, **501**), `DevReportingController` (`dev` profile), `ApiExceptionHandler`, DTOs `AttendanceReportDto`, `DashboardDto`, `HrExportBatchDto`, `HrExportTriggerRequestDto`, `HrExportTriggerResponseDto`, `ErrorResponseDto` |
+| application | `HrExportService` (use case), `HrExportScheduler` (trigger), `ReportQueryService`, `HrExportResult`, `HrExportSettings`, `Dashboard` |
+| domain | ports `IHrPayrollGateway`, `IHrExportBatchStore`, `IHrExportStatusReader`, `IAttendanceReportReader`, `IExportAlertNotifier`; services `ExportSchedule`, `ExportRetryPolicy`; model `HrExportBatch`, `ExportPeriod`, `FactoryCalendar`, `PayrollBatch`, `PayrollRecord`, `PayrollSelection`, `DeliveryResult`, `DeliveryOutcome`, `BatchStatus`, `TriggerSource`, `DataScope`, `ExportAlert`, report queries and rows |
+| infrastructure | `RestHrPayrollGateway`, `CsvFileHrPayrollGateway`, `PostgresHrExportBatchRepository`, `PostgresAttendanceReportReader`, `LoggingExportAlertNotifier` |
+| composition root | `config/ReportingWiringConfig` |
+
+### user-qr-service (Khoa), gate-station-service (Khôi)
 The owner supplies the names. The bootstrap provides only `*Application`, a `*Controller` of 501 stubs and `ErrorResponseDto`.
 
 Rule: an empty class for every name in a design tree is **not** SOLID evidence. For an unimplemented feature prefer a clearly labelled stub (501) or a TODO in [TODO](TODO.md) over a class that pretends.

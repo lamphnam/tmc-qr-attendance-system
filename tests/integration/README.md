@@ -6,6 +6,7 @@ queue, commands counted by the mock turnstile), never on "HTTP 200" alone.
 ```bash
 docker compose up --build -d --wait
 node --test tests/integration/slice.test.mjs          # Node >= 20, no npm install needed
+node --test tests/integration/reporting.test.mjs      # reporting-service + the real mock HR
 SKIP_DISRUPTIVE=1 node --test tests/integration/slice.test.mjs
 ```
 
@@ -17,6 +18,9 @@ SKIP_DISRUPTIVE=1 node --test tests/integration/slice.test.mjs
 | kiosk offline -> PENDING -> reconnect -> SYNCED | no | ADR-01 slice: local turnstile works while central sync is off |
 | central **stopped** + kiosk **restarted** | **yes** (stops `attendance-processor`, restarts `kiosk-agent`) | PENDING survives a process restart, retries, lands once |
 | mock HR re-send + container restart | **yes** (restarts `mock-hr-payroll-api`) | receiver-side dedupe and persistence |
+| `reporting.test.mjs`: manual export of an unused past month | no | batch id equals `nameUUIDFromBytes("tmc-hr-export:YYYY-MM")` recomputed in Node; only ALLOWED rows frozen (`psql`); the real mock HR received it once; a second trigger is 409 |
+| `reporting.test.mjs`: HR returns 503, then recovers | no (toggles mock HR failure injection, always reset) | 202 + persisted retry, nothing stored at HR; the retry reuses the same batch and HR counts it once |
+| `reporting.test.mjs`: dashboard through the gateway | no | the dev route reaches PostgreSQL and shows the latest batch |
 
 Scope warning: events are **synthetic** (no QR, no TOTP, no authentication). Passing this suite does **not** demonstrate
 NFR-1/2/3/6, ADR-02 or ADR-03. Owners add their real tests next to this file.

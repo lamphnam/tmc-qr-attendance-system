@@ -1,7 +1,7 @@
 # DECISIONS — open decisions, bootstrap decisions, known limitations
 
 1. [Decision register D01–D16](#decision-register) — what the team still has to settle, with its current status.
-2. [Bootstrap decisions B01–B20](#bootstrap-decisions) — concrete choices the scaffold had to make. **Proposals**, each needs its owner's sign-off.
+2. [Bootstrap decisions B01–B20](#bootstrap-decisions) — concrete choices the scaffold had to make, followed by later team decisions (B24 onwards). **Proposals**, each needs its owner's sign-off.
 3. [Known limitations](#known-limitations) — the canonical list to quote in the report and the demo.
 
 Status values: **OPEN** nothing chosen · **PROPOSED** the scaffold chose something (see the B-id), awaiting sign-off · **RESOLVED** settled as policy.
@@ -19,7 +19,7 @@ Status values: **OPEN** nothing chosen · **PROPOSED** the scaffold chose someth
 | D07 | P1 | Multi-kiosk anti-replay | Local `(employeeId, step)` only stops same-kiosk replay; no global anti-replay while offline | **OPEN** (limitation) |
 | D08 | P1 | Whitelist / secret protection and revocation | Secret at rest, key rotation, scoped whitelist; offline revoke is delayed until sync | **OPEN** (B12) |
 | D09 | P1 | HR mock failure code | Examples say 500 and 503; handle any retryable 5xx, never one literal code | **PROPOSED** B09 |
-| D10 | P1 | HR export period and stable batch id | Define previous calendar month, duplicate manual trigger, storage and dedupe semantics | **OPEN** |
+| D10 | P1 | HR export period and stable batch id | Define previous calendar month, duplicate manual trigger, storage and dedupe semantics | **PROPOSED** B24 |
 | D11 | P1 | Remote manual-gate command | M1 wants a dedicated authenticated channel but gives no protocol; do not fake end-to-end | **OPEN** |
 | D12 | P1 | Clock dependencies | NTP / skew checks for RFC 6238; testable with an injectable clock | **OPEN** (kiosk code already injects a `Clock`) |
 | D13 | P1 | "Zero data loss" claim | A disk failure before sync can lose events; scope the claim | **RESOLVED** (policy: [Known limitations](#known-limitations)) |
@@ -53,6 +53,11 @@ Added 2026-11-01 by the scaffold. Nothing here changes [BASELINE-M1] (4 services
 | B18 | - | The mock turnstile contract (`POST /gates/{id}/open`, status, command log, failure injection) is invented here; API-CONTRACTS does not define it | Needed for the independent kiosk → turnstile test | Khánh may replace it | Khánh |
 | B19 | - | Error body everywhere is `{code, message, correlationId}`; the gateway forwards or mints `X-Request-Id` and services echo it | API-CONTRACTS conventions | - | All |
 | B20 | - | `attendance-processor` repository tests use real PostgreSQL 16 through Testcontainers and are **skipped (not faked)** without Docker | Real engines | CI needs a Docker-capable runner | Nam |
+| B24 | D10 | 2026-11-15 Nam: **(1)** the export period is a calendar month in **Asia/Ho_Chi_Minh** (`[1st 00:00, next 1st 00:00)` local), never UTC; the previous month is due on day 1 at **01:00** local. **(2)** `batch_uuid = UUID.nameUUIDFromBytes("tmc-hr-export:YYYY-MM")`, one row per period (`period` UNIQUE): the scheduled run, a retry after a restart and a manual trigger reuse that batch. **(3)** Items are **frozen** at creation (`hr_export_batch_items`): accepted scans only (`scan_result = 'ALLOWED'`), dev fixtures excluded; retries resend exactly those ids. **(4)** A manual trigger for a delivered month answers **409 `ALREADY_EXPORTED`** and sends nothing; for a FAILED month it re-arms the same batch; a month that is not over is refused (400). **(5)** Retry: backoff 1, 2, 4… min capped at 30 min; nothing is scheduled after `created_at + 5 h` (06:00 for the 01:00 run); then FAILED + alert. A missed 01:00 run is caught up by the next poll | A scan at 06:30 on the 1st (VN) is 23:30 UTC the day before; a random id per run would create several batches for one month (NFR-3) | Late events are not in a frozen batch ([Known limitations](#known-limitations)); a supplementary batch would be a new decision. Schema: `init-db/schema.sql` (columns `trigger_source`, `created_at`, `retry_deadline`, status `SENDING`) | Nam (owner); Khôi for the attendance semantics (ALLOWED-only, fixtures, time zone) |
+| B25 | D09 | 2026-11-15 Nam: the export depends on a port `IHrPayrollGateway` whose contract (idempotent resend, `ACKNOWLEDGED` only on receiver confirmation, transient failure = `RETRYABLE` with no partial batch, never throws) is checked by one shared contract test. Two channels, chosen by `tmc.hr-export.channel`: `rest` (default, mock HR API; 5xx/408/429/timeouts retryable, other 4xx rejected) and `file` (CSV per batch in a drop directory, written then renamed, never overwritten; success is `DELIVERED` → batch `SENT`) | M1 says "batch export to HR/Payroll" without a protocol and the HR API contract is DRAFT; the use case must not change when the channel does | A new channel = one class with `@ConditionalOnProperty` plus the contract test subclass. An unknown channel value fails startup | Nam |
+| B26 | D04 | 2026-11-15 Nam: reporting logic is reachable only through the unauthenticated `/api/dev/reports/*` routes (`dev` profile, gateway location); `/api/v1/reports/*` stay 501 until JWT/RBAC exists. `REPORTING_INCLUDE_DEV_FIXTURES` (default **false** in the service, **true** in Compose) lets a developer stack report and export `dev_fixture` rows | Same pattern as B04/B15; without the opt-in the demo has nothing to report because every slice event is a fixture | Remove the gateway location, the profile and the opt-in for any non-developer environment | Khoa (auth), Nam |
+
+B21–B23 are taken by `feat/kiosk-whitelist-sync` / `feat/user-qr-service-totp` (not yet merged); this branch starts at B24 so the numbers do not collide.
 
 ## Source contrasts (do not resolve silently)
 
@@ -75,6 +80,7 @@ Canonical list. Quote these instead of re-deriving them, and never contradict th
 - **The mock turnstile proves nothing physical.** HTTP 200 is not "gate opened"; mock latency is not hardware latency.
 - **A one-machine Compose stack simulates edge + central**; it is not evidence of a factory deployment, and `-Xmx192m` is not a memory claim (D15).
 - **Not measured:** NFR-1 (≤ 2 s) and NFR-7 (≤ 30 s). Anything unmeasured is `NOT_RUN`, never a number from arithmetic.
+- **HR export (B24–B26).** A batch is frozen when it is created: an event that reaches central later (a kiosk that was offline over the month end) is **not** in that month's batch and is not exported automatically. The only alert is an ERROR log line (`HR_EXPORT_ALERT`) plus the FAILED batch on the dashboard; no mail/SMS reaches HR or Admin. The `file` channel cannot know whether payroll imported the file. Reports have no shift dimension (M1's data model has no shift definitions) and `rejectedScans` stays 0 until rejected scans are synced (D06). The export and reports are unauthenticated dev routes.
 
 ## Change governance
 

@@ -1,6 +1,6 @@
 # STATUS — what exists, what was verified
 
-Snapshot of **2026-11-01** right after the bootstrap. Every result below comes from a command that was actually run on the bootstrap machine; what was not run is `NOT_TESTED`. Re-run the commands on your machine before trusting this. Requirement-level status is in [TRACEABILITY](TRACEABILITY.md); remaining work in [TODO](TODO.md); product limitations in [DECISIONS](DECISIONS.md#known-limitations).
+Snapshot of **2026-11-01** right after the bootstrap; the `reporting-service` row and commands 16–18 were added on **2026-11-15** (branch `feat/reporting-service`). Every result below comes from a command that was actually run on the bootstrap machine; what was not run is `NOT_TESTED`. Re-run the commands on your machine before trusting this. Requirement-level status is in [TRACEABILITY](TRACEABILITY.md); remaining work in [TODO](TODO.md); product limitations in [DECISIONS](DECISIONS.md#known-limitations).
 
 ## Status labels
 
@@ -35,7 +35,7 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 | `user-qr-service` | Khoa | **SCAFFOLD** | `/services/user-qr/health` | boots; health reflects real PostgreSQL; `GET /api/v1/qr/generate` and `/api/v1/kiosk/whitelist` answer **501** | JWT/RBAC, TOTP, whitelist, HR sync, revocation, audit chain, MFA |
 | `gate-station-service` | Khôi | **SCAFFOLD** | `/services/gate-station/health` | boots + real health; `POST /api/v1/gates`, `GET …/status`, `POST …/manual-open` answer **501** | registration, heartbeat, manual open + audit |
 | `attendance-processor` | Khôi | **DEV_SLICE** | `/services/attendance/health` | real idempotent ingestion: single event + batch, per-event ack after commit, SAME vs CONFLICT, 503 when the DB is down, safe under 8 threads on one id. Only via `/api/dev/attendance/*`; `/api/v1/attendance/*` answer **501** | authenticated production routes, rejected scans (D06), reference validation |
-| `reporting-service` | Nam | **SCAFFOLD** | `/services/reporting/health` | boots + real health; 3 report/dashboard/hr-export routes answer **501**; `tmc.hr-api.base-url` configured | reports, dashboard, HR export scheduler/retry |
+| `reporting-service` | Nam | **DEV_SLICE** | `/services/reporting/health` | (2026-11-15, §3 rows 16–18) factory report and dashboard in Asia/Ho_Chi_Minh days, ALLOWED-only, fixtures excluded unless opted in; monthly HR export with a period-derived `batch_uuid`, frozen items, 01:00 schedule with catch-up, backoff until created + 5 h, FAILED + log alert, compare-and-set claims; two payroll channels (`rest`, `file`) under one contract test. Only via `/api/dev/reports/*`; `/api/v1/reports/*` answer **501** | authentication/roles, shift dimension, mail alert, re-export of late events, NFR-7 measurement |
 | `kiosk-agent` | Khánh | **DEV_SLICE** | `/services/kiosk/health`; host `8085` | SQLite WAL + `synchronous=FULL`; PENDING committed before the turnstile call; sync by per-id ack with backoff; FAILED only on a per-event rejection; the offline switch cuts only kiosk → central; health reads the real SQLite file. `POST /api/local/scan` answers **501** | QR scan, TOTP, whitelist cache, anti-replay (`used_tokens` table unused), rejected scans, heartbeat, manual open, auth to central |
 | `mock-turnstile-api` | Khánh | **MOCK** | `/health`; host `8090` | `POST /gates/{id}/open`, command counting, failure injection; always `physicalOpenConfirmed:false` | contract is invented by the bootstrap (B18) |
 | `mock-hr-payroll-api` | Nam | **MOCK** | `/health`; host `8091` | idempotent upsert by `attendanceId`, `duplicateBatch`, 4xx/5xx injection, state survives a container restart, `GET /mock/hr/employees` | HR contract is DRAFT (D09/D10) |
@@ -64,6 +64,9 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 | 13 | `git add -A` preview (git-dir kept outside the repo; **no `.git` created**) | 0 | 180 files would be tracked; no `.env`, `*.db`, `target/`, `node_modules/`, `dist/`, `*.jar`; secret scan found only `dev-only-change-me` |
 | 14 | `make help` / `config` / `smoke` / `check-java` | 0 / 0 / 0 / **2** on JDK 17, 0 on JDK 21 | the guard works both ways |
 | 15 | `node scripts/verify.mjs --down` (after the docs consolidation of the same day; shell `JAVA_HOME` was JDK 17, the script found JDK 21 itself) | **0** | all 8 stages PASS: java 76 tests / 0 skipped · frontend 17 · mocks 6 + 11 · docs check · compose config · stack up (95 s) · smoke 29/29 · integration 8/8 |
+| 16 | `mvn -B -ntp -pl backend-services/reporting-service test` (2026-11-15, JDK 21.0.11, Docker Engine 29.4.0) | **0** | **89 tests, 0 failed, 0 skipped**: domain 26, use case 15, payroll channels 29 (incl. 5 shared contract clauses × 2), dev profile 4, PostgreSQL 16 Testcontainers 8, app 3, ArchUnit 4. A first run had 1 failure from a wrong test expectation (null fields are omitted, not `null`); fixed in the test. Mutation checks: `ACKNOWLEDGED` from the file channel fails 3 contract tests; a `JdbcTemplate` field in `HrExportService` fails ArchUnit |
+| 17 | `node scripts/verify.mjs` (2026-11-15, full, after the reporting change) | **1** | java **161 tests / 0 skipped**, frontend, mocks 6 + 11, docs, compose config, stack up, smoke **31/31** PASS; integration **10/11**: `slice.test.mjs` "central really DOWN and a kiosk RESTART" read `/api/dev/kiosk/queue` right after the kiosk health turned UP and got no `events` (it passed in an earlier run the same day). An earlier full run that day failed 2 tests for two causes since fixed: the reporting env vars had been added to the wrong Compose service, and `node --test` ran both integration files in parallel (now `--test-concurrency=1`) |
+| 18 | `node scripts/verify.mjs --only integration` (right after row 17, same stack) | **0** | **11/11**, 0 skipped: `slice.test.mjs` 8 + `reporting.test.mjs` 3 (manual export to the real mock HR with the Node-recomputed batch id, 503 then recovery on the same batch, dashboard through the gateway) |
 
 ### Findings fixed during verification
 1. **Maven ran on JDK 17** because `JAVA_HOME` pointed there → documented in README and guarded by `make check-java`.
@@ -72,6 +75,7 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 4. **`smoke.ps1`** on PowerShell 5.1: `.Content` is `byte[]` for `application/vnd.*+json`, and error bodies live in `ErrorDetails.Message`.
 5. **Frontend typecheck** needed `@types/node` for `vite.config.ts`.
 6. **Integration test:** the test's expected `'t'` was wrong (`'true'` when a boolean is concatenated in SQL); the product behaved correctly.
+7. **Flaky test (2026-11-15):** the kiosk restart case of `slice.test.mjs` can query the queue a moment after health reports UP and fail; seen once in row 17, passed in row 18. Not fixed (not this branch's module); a retry inside `kioskEvent` would remove the race.
 
 ## 4. Not verified / caveats of this verification
 
@@ -82,4 +86,4 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 
 ## 5. Dev-only / mock items (must not reach a "production" build)
 
-`/api/dev/attendance/*` and `/api/dev/kiosk/*` (profile `dev`, unauthenticated) · the two matching `location` blocks in `nginx-gateway/nginx.conf` · `QueueSyntheticEventUseCase` (synthetic events, no QR/TOTP) · column `attendance_events.dev_fixture` · `mock-turnstile-api`, `mock-hr-payroll-api` · password `dev-only-change-me` · `HEALTH_SHOW_DETAILS=always` · `kiosk.central.sync-path=/api/dev/attendance/sync`.
+`/api/dev/attendance/*`, `/api/dev/kiosk/*` and `/api/dev/reports/*` (profile `dev`, unauthenticated) · the three matching `location` blocks in `nginx-gateway/nginx.conf` · `REPORTING_INCLUDE_DEV_FIXTURES=true` in Compose (reports and the HR export count fixture rows, B26) · `QueueSyntheticEventUseCase` (synthetic events, no QR/TOTP) · column `attendance_events.dev_fixture` · `mock-turnstile-api`, `mock-hr-payroll-api` · password `dev-only-change-me` · `HEALTH_SHOW_DETAILS=always` · `kiosk.central.sync-path=/api/dev/attendance/sync`.

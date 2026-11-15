@@ -89,6 +89,11 @@ services:
     environment:
       <<: [*java-env, *db-env]
       HR_API_BASE_URL: http://mock-hr-payroll-api:8091
+      # DEV ONLY: also count rows written by the /api/dev/attendance fixtures, so the demo has data to report and export.
+      REPORTING_INCLUDE_DEV_FIXTURES: ${REPORTING_INCLUDE_DEV_FIXTURES:-true}
+      # Payroll channel (B25): rest = mock HR API, file = CSV files in HR_EXPORT_FILE_DIR inside the container.
+      HR_EXPORT_CHANNEL: ${HR_EXPORT_CHANNEL:-rest}
+      HR_EXPORT_FILE_DIR: /tmp/tmc-hr-drop
     depends_on:
       central-db:
         condition: service_healthy

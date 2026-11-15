@@ -90,6 +90,6 @@ Checked boxes are verified on 2026-11-01 (commands and exit codes in [STATUS](ST
 - [ ] Offline 20 unique events, none lost or duplicated, restart recovery (T02).
 - [ ] Guarded manual open with an audit record (T04).
 - [ ] QR revoked after a whitelist sync; offline limitations disclosed (T03).
-- [ ] HR export: schedule + retry + stable idempotency + manual trigger + alert (T05).
+- [x] HR export: schedule + retry + stable idempotency + manual trigger + alert (T05) — dev slice only: unauthenticated `/api/dev/reports/*`, the alert is a log line ([DECISIONS B24–B26](DECISIONS.md#bootstrap-decisions)). Evidence: `HrExportServiceTest` (fake clock: 01:00 boundary, backoff, give-up at 06:00, catch-up, lease), `ReportingPostgresIntegrationTest`, `tests/integration/reporting.test.mjs` (real mock HR).
 - [ ] Load test with p95/p99 measured under the official workload (T01, T06).
 - [ ] M2 views (Module / C&C / Allocation), SOLID evidence in real code, reflection, GitHub URL.

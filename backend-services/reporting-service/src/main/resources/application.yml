@@ -21,6 +21,28 @@ tmc:
   # Mock HR/Payroll in Compose is reached by its service DNS name, never by localhost across containers.
   hr-api:
     base-url: ${HR_API_BASE_URL:http://localhost:8091}
+    connect-timeout-ms: ${HR_API_CONNECT_TIMEOUT_MS:2000}
+    read-timeout-ms: ${HR_API_READ_TIMEOUT_MS:10000}
+  reporting:
+    # Rows written by the dev-only /api/dev/attendance fixtures (dev_fixture = true) are NOT real data. Only a developer
+    # stack may opt in, so the demo has something to report and export (docs/STATUS.md section 5).
+    include-dev-fixtures: ${REPORTING_INCLUDE_DEV_FIXTURES:false}
+  hr-export:
+    # Payroll channel (B25): `rest` = HR/Payroll API, `file` = CSV drop directory. An unknown value fails startup.
+    channel: ${HR_EXPORT_CHANNEL:rest}
+    file:
+      directory: ${HR_EXPORT_FILE_DIR:/tmp/tmc-hr-drop}
+    scheduler-enabled: ${HR_EXPORT_SCHEDULER_ENABLED:true}
+    # The previous month is due on day 1 at this factory time (Asia/Ho_Chi_Minh, D10 / B24).
+    run-at: ${HR_EXPORT_RUN_AT:01:00}
+    poll-interval-ms: ${HR_EXPORT_POLL_INTERVAL_MS:30000}
+    backoff-base-ms: ${HR_EXPORT_BACKOFF_BASE_MS:60000}
+    backoff-max-ms: ${HR_EXPORT_BACKOFF_MAX_MS:1800000}
+    # No retry after createdAt + 5 h: the 01:00 run stops retrying at 06:00 (NFR-6).
+    retry-window-ms: ${HR_EXPORT_RETRY_WINDOW_MS:18000000}
+    # Must exceed the channel's own timeout; a crashed attempt is retried after it.
+    attempt-lease-ms: ${HR_EXPORT_ATTEMPT_LEASE_MS:120000}
+    due-batch-limit: 10
 
 management:
   endpoints:

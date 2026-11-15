@@ -15,8 +15,8 @@ Recommend explicit tables and unique keys, with separate ownership and migration
 | `kiosks` | `kiosk_id PK`, `factory_id`, `last_heartbeat`, `status` | Khôi |
 | `attendance_events` | `attendance_id UUID PK`, `employee_id`, `factory_id`, `gate_id`, `direction`, `occurred_at`, `scan_result`, `recorded_at` | Khôi; unique ID idempotency |
 | `audit_logs` | `audit_id`, `actor_id`, `action`, `resource`, `occurred_at`, `previous_hash`, `checksum` | Khoa; append-only/tamper evidence |
-| `hr_export_batches` | `batch_uuid PK`, `period`, `status`, `attempt_count`, `last_attempt_at`, `next_retry_at`, `last_error` | Nam; durable retry |
-| `hr_export_batch_items` | `batch_uuid`, `attendance_id`, unique pair | Nam; dedupe/traceability |
+| `hr_export_batches` | `batch_uuid PK` (= `nameUUIDFromBytes("tmc-hr-export:"+period)`), `period` UNIQUE, `status` (`PENDING`, `SENDING`, `SENT`, `ACKNOWLEDGED`, `FAILED`), `trigger_source`, `created_at`, `retry_deadline`, `attempt_count`, `last_attempt_at`, `next_retry_at`, `last_error` | Nam; one batch per Vietnamese calendar month, durable retry, `attempt_count` is the optimistic-lock version ([DECISIONS B24](DECISIONS.md#bootstrap-decisions)) |
+| `hr_export_batch_items` | `batch_uuid`, `attendance_id`, unique pair | Nam; frozen at batch creation (ALLOWED, non-fixture events of the period); retries resend exactly these |
 | `users/roles/...` | subject, role/permission mappings | Khoa; six roles |
 
 **Important:** PostgreSQL schema is shared by services; don't have two services own same migrations. Choose a single `init-db/schema.sql` for demo or migrations (Flyway) with coordinated ownership. Avoid Hibernate `ddl-auto=create-drop` deleting teammates' data; never use this in a persistent demo DB.
