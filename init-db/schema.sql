@@ -117,17 +117,30 @@ CREATE INDEX IF NOT EXISTS idx_attendance_factory_time  ON attendance_events (fa
 CREATE INDEX IF NOT EXISTS idx_attendance_employee_time ON attendance_events (employee_id, occurred_at);
 
 -- ---- reporting-service (owner: Nam) ----------------------------------
+-- D10 / B24: one batch per period. batch_uuid is derived from the period
+-- (UUID.nameUUIDFromBytes("tmc-hr-export:YYYY-MM")), so the scheduled run, a retry
+-- after a restart and a manual trigger all land on the same row. The period is a
+-- calendar month in Asia/Ho_Chi_Minh. SENDING = an attempt holds a lease until
+-- next_retry_at (a crashed attempt is retried after it); SENT = handed over without
+-- a receiver confirmation (file drop); ACKNOWLEDGED = the receiver confirmed it.
 CREATE TABLE IF NOT EXISTS hr_export_batches (
     batch_uuid       UUID         PRIMARY KEY,
-    period           CHAR(7)      NOT NULL,            -- 'YYYY-MM' (open: D10)
+    period           CHAR(7)      NOT NULL UNIQUE,     -- 'YYYY-MM'
     status           VARCHAR(16)  NOT NULL DEFAULT 'PENDING'
-                     CHECK (status IN ('PENDING', 'SENT', 'ACKNOWLEDGED', 'FAILED')),
+                     CHECK (status IN ('PENDING', 'SENDING', 'SENT', 'ACKNOWLEDGED', 'FAILED')),
+    trigger_source   VARCHAR(16)  NOT NULL CHECK (trigger_source IN ('SCHEDULED', 'MANUAL')),
+    created_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    -- No retry is scheduled after this instant; the batch becomes FAILED and an alert is raised.
+    retry_deadline   TIMESTAMPTZ  NOT NULL,
     attempt_count    INTEGER      NOT NULL DEFAULT 0,
     last_attempt_at  TIMESTAMPTZ,
     next_retry_at    TIMESTAMPTZ,
     last_error       TEXT
 );
 
+CREATE INDEX IF NOT EXISTS idx_hr_export_due ON hr_export_batches (status, next_retry_at);
+
+-- Frozen when the batch is created (B24): retries resend exactly these ids.
 CREATE TABLE IF NOT EXISTS hr_export_batch_items (
     batch_uuid     UUID NOT NULL REFERENCES hr_export_batches (batch_uuid) ON DELETE CASCADE,
     attendance_id  UUID NOT NULL REFERENCES attendance_events (attendance_id),

@@ -99,6 +99,8 @@ expect "unknown service probe is a JSON 404"                 GET  "$GATEWAY/serv
 echo "[6] dev-only fixtures exist ONLY because the dev profile is on"
 expect "central dev ingestion rejects an empty event"        POST "$GATEWAY/api/dev/attendance/events"       400 '"code":"VALIDATION_ERROR"' '{}'
 expect "kiosk dev queue readable"                            GET  "$GATEWAY/api/dev/kiosk/queue"             200 '"counts"'
+expect "reporting dev dashboard reads PostgreSQL"            GET  "$GATEWAY/api/dev/reports/dashboard?factoryId=BD" 200 '"timeZone":"Asia/Ho_Chi_Minh"'
+expect "reporting dev export refuses an unfinished month"    POST "$GATEWAY/api/dev/reports/hr-export/trigger" 400 '"code":"INVALID_REQUEST"' '{"period":"2999-12"}'
 
 echo
 if [ "$FAILS" -eq 0 ]; then

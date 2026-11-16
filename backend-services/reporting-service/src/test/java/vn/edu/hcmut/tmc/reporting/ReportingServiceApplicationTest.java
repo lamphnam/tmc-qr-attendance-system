@@ -14,12 +14,14 @@ import org.springframework.http.HttpMethod;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * Boots the full context against an unreachable database: the service must start, /actuator/health
- * must say DOWN (readiness is real, not hard-coded), and every contract stub must answer an honest 501.
+ * Boots the full context WITHOUT the dev profile against an unreachable database: the service must start,
+ * /actuator/health must say DOWN (readiness is real, not hard-coded), every production stub must answer an honest 501,
+ * and the unauthenticated dev routes must not exist.
  */
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:postgresql://127.0.0.1:1/unreachable",
-        "spring.datasource.hikari.connection-timeout=250"
+        "spring.datasource.hikari.connection-timeout=250",
+        "tmc.hr-export.scheduler-enabled=false"
 })
 @AutoConfigureMockMvc
 class ReportingServiceApplicationTest {
@@ -49,5 +51,11 @@ class ReportingServiceApplicationTest {
                     .andExpect(jsonPath("$.code").value("NOT_IMPLEMENTED"))
                     .andExpect(jsonPath("$.correlationId").isNotEmpty());
         }
+    }
+
+    @Test
+    void devRoutesDoNotExistWithoutTheDevProfile() throws Exception {
+        mvc.perform(get("/api/dev/reports/dashboard").param("factoryId", "BD")).andExpect(status().isNotFound());
+        mvc.perform(request(HttpMethod.POST, "/api/dev/reports/hr-export/trigger")).andExpect(status().isNotFound());
     }
 }

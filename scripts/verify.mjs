@@ -148,7 +148,7 @@ stage('smoke', {
 
 stage('integration', {
   stack: true,
-  body: (name) => simple(name, process.execPath, ['--test', 'tests/integration/slice.test.mjs', 'tests/integration/user-qr.test.mjs'], {}, (o) => `${/ℹ pass (\d+)/.exec(o)?.[1] ?? '?'} of ${/ℹ tests (\d+)/.exec(o)?.[1] ?? '?'} passed`),
+  body: (name) => simple(name, process.execPath, ['--test', '--test-concurrency=1', 'tests/integration/slice.test.mjs', 'tests/integration/user-qr.test.mjs', 'tests/integration/reporting.test.mjs'], {}, (o) => `${/ℹ pass (\d+)/.exec(o)?.[1] ?? '?'} of ${/ℹ tests (\d+)/.exec(o)?.[1] ?? '?'} passed`),
 });
 
 if (args.has('--down') && !FAST) {

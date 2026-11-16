@@ -51,6 +51,7 @@ docker compose config --quiet
 bash scripts/smoke.sh                                         # cần stack đang chạy
 node --test tests/integration/slice.test.mjs                  # cần stack đang chạy; SKIP_DISRUPTIVE=1 để bỏ test dừng/restart container
 node --test tests/integration/user-qr.test.mjs                # QR lifecycle, whitelist và checksum; schema/seed mới
+node --test tests/integration/reporting.test.mjs              # báo cáo + xuất HR qua gateway tới mock HR thật (chạy tuần tự với slice, không song song)
 ```
 
 **Một lệnh cho tất cả:** `node scripts/verify.mjs` chạy mọi bước trên (tự tìm JDK 21, dựng stack, smoke, integration) và in bảng kết quả trung thực (`--fast` bỏ phần Docker; log ở `.verify-logs/`). `node scripts/check-docs.mjs` kiểm tra link và độ nhất quán của markdown. `make test` chạy 3 dòng đầu. Chạy một test đơn lẻ: [CLAUDE.md](CLAUDE.md). Kết quả đã chạy thật khi dựng repo: [docs/STATUS.md](docs/STATUS.md#3-commands-run-and-results). Kế hoạch kiểm thử và tiêu chí nghiệm thu: [docs/TESTING.md](docs/TESTING.md).

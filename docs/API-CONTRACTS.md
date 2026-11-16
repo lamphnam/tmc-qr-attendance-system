@@ -221,6 +221,18 @@ The existing dev ingestion routes create fixtures and therefore do not seed thes
 - `GET /api/v1/reports/attendance?factoryId=BD&from=...&to=...` [DRAFT].
 - `GET /api/v1/reports/dashboard?factoryId=BD` [DRAFT].
 - `POST /api/v1/reports/hr-export/trigger` [TEAM-PLAN] with `yearMonth`, protected HR/Admin role and idempotency key [DRAFT].
+- The three `/api/v1/reports/*` routes answer **501** until JWT/RBAC exists. The working logic is behind the unauthenticated dev routes below ([DECISIONS B24–B26](DECISIONS.md#bootstrap-decisions)); their shapes are the proposal for the v1 routes. Days are factory days in `Asia/Ho_Chi_Minh`, instants are UTC, absent fields are omitted (not `null`).
+
+| Dev route (`dev` profile) | Request | Answer |
+|---|---|---|
+| `GET /api/dev/reports/attendance` | `factoryId`, `from`, `to` (ISO dates, inclusive, ≤ 31 days), optional `department`, `offset` (0), `limit` (100, ≤ 500) | 200 `{factoryId, from, to, timeZone, offset, limit, hasMore, rows[{workDate, employeeId, fullName?, department?, firstIn?, lastOut?, inCount, outCount}], departments[{department?, employees, scans}]}`; only `ALLOWED` scans |
+| `GET /api/dev/reports/dashboard` | `factoryId`, optional `date` (today in factory time) | 200 `{factoryId, date, timeZone, employeesPresent, scansIn, scansOut, rejectedScans, stillInside, lastScanAt?, presentByDepartment[], latestHrExport?}` |
+| `POST /api/dev/reports/hr-export/trigger` | `{"period":"YYYY-MM"}` | 200 `{outcome:"DELIVERED", duplicateBatch, batch}` · 202 `RETRY_SCHEDULED` (batch `PENDING` with `nextRetryAt`) · 409 `ALREADY_EXPORTED` / `EXPORT_IN_PROGRESS` · 502 `HR_EXPORT_FAILED` (alert raised) · 400 month not over / malformed |
+| `GET /api/dev/reports/hr-export/batches/{period}` | — | 200 `{batchUuid, period, status, triggerSource, createdAt, retryDeadline, attemptCount, lastAttemptAt?, nextRetryAt?, lastError?, itemCount}` · 404 |
+
+Errors use `{code, message, correlationId}`: 400 `INVALID_REQUEST` / `VALIDATION_ERROR` / `MALFORMED_REQUEST`, 503 `STORAGE_UNAVAILABLE`.
+
+What reporting sends to HR (channel `rest`): `POST /mock/hr/attendance-batches` with header `Idempotency-Key: <batchUuid>` and `{batchUuid, period, records[{attendanceId, employeeId, factoryId, gateId, direction, occurredAt}]}`; a 200 whose body is `{status:"ACCEPTED", batchUuid}` for the same batch is the acknowledgement. Channel `file` writes `hr-export_<period>_<batchUuid>.csv` with header `batch_uuid,period,attendance_id,employee_id,factory_id,gate_id,direction,occurred_at`.
 - Mock HR `POST /mock/hr/attendance-batches` [DRAFT] with batch UUID and attendanceIds; implement receiver-side upsert and failure flag `SIMULATE_HR_DOWN` (team notes disagree HTTP 500 vs 503: both transient; test both).
 - Scheduled job @ day 1 01:00 / retry until 06:00 / alert / 12:00 reconciliation deadline from M1. Manual trigger cannot accidentally duplicate real scheduled batch.
 

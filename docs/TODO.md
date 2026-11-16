@@ -63,8 +63,8 @@ Cross-cutting references (do not restate them in a PR): who depends on whom and 
 | P | Task | Depends on |
 |---|---|---|
 | P0 | Review and merge the scaffold PR, publish the repo URL, enable minimal CI: `mvn test` on a runner **with Docker**, frontend typecheck/build, `docker compose config` | — |
-| P1 | Data semantics with Khôi: exclude rows with `dev_fixture = true`, timezone, reporting period (D10: previous calendar month) | Khôi |
-| P1 | `GET /api/v1/reports/attendance` and `/dashboard` (501 today); measure NFR-7 ≤ 30 s on a representative dataset (T06) | Khoa (roles) |
-| P1 | HR export: `hr_export_batches`/`_items`, stable `batchUuid`, backoff retry, **injectable clock**, 01:00 scheduler, retry to 06:00, alert; a manual trigger must not create a batch that duplicates a scheduled one (D10, T05). Treat any 5xx/timeout as retryable (D09) | mock HR (exists) |
+| P1 | Confirm with Khôi the semantics B24 chose (ALLOWED-only export, `dev_fixture` excluded, Asia/Ho_Chi_Minh days and months) so D10 can move to RESOLVED | Khôi |
+| P1 | Open `GET /api/v1/reports/attendance` and `/dashboard` with authentication and roles once JWT exists (the logic already works on `/api/dev/reports/*`); measure NFR-7 ≤ 30 s on a representative dataset (T06) | Khoa (roles) |
+| P1 | HR export: open `POST /api/v1/reports/hr-export/trigger` for HR/Admin once JWT/RBAC exists (logic done on the dev route, B24–B26); decide whether late events need a supplementary batch; a real alert channel (mail) if the report needs one | Khoa (roles) |
 | P1 | NFR-1 load test (T01): pick **one** tool (k6 / JMeter / Locust), use distinct employees/time steps, time the fast path separately from background sync, report p50/p95/p99 or `NOT_RUN` | Khánh (real scan path) |
 | P2 | Extend `tests/integration/` per finished feature; assemble Testing & Evaluation, Allocation View and the final report format | — |

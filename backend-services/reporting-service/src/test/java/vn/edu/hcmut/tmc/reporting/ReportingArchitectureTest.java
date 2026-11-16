@@ -1,5 +1,7 @@
 package vn.edu.hcmut.tmc.reporting;
 
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
 
@@ -9,8 +11,8 @@ import com.tngtech.archunit.junit.ArchTest;
 import com.tngtech.archunit.lang.ArchRule;
 
 /**
- * Guards docs/ARCHITECTURE.md "Dependency direction". Layers are optional because this module is still a scaffold:
- * the rule starts biting the moment the owner adds application/domain/infrastructure packages.
+ * Guards docs/ARCHITECTURE.md "Dependency direction" for reporting-service. These rules are what makes the DIP claim
+ * checkable: breaking the direction fails {@code mvn test}.
  */
 @AnalyzeClasses(packages = "vn.edu.hcmut.tmc.reporting", importOptions = ImportOption.DoNotIncludeTests.class)
 class ReportingArchitectureTest {
@@ -33,6 +35,19 @@ class ReportingArchitectureTest {
             .that().resideInAPackage("..domain..")
             .should().dependOnClassesThat().resideInAnyPackage(
                     "org.springframework..", "jakarta..", "javax..", "java.sql..",
-                    "com.fasterxml..", "org.postgresql..", "org.sqlite..")
-            .allowEmptyShould(true);
+                    "com.fasterxml..", "org.postgresql..", "org.sqlite..");
+
+    /** The export and report use cases know their ports only: no SQL, HTTP client or file system types. */
+    @ArchTest
+    static final ArchRule applicationKnowsNoJdbcHttpOrFiles = noClasses()
+            .that().resideInAPackage("..application..")
+            .should().dependOnClassesThat().resideInAnyPackage(
+                    "java.sql..", "org.springframework.jdbc..", "org.postgresql..",
+                    "org.springframework.web.client..", "java.net.http..", "java.nio.file..", "java.io..");
+
+    /** Ports are owned by the domain and implemented only at the edge. */
+    @ArchTest
+    static final ArchRule portsAreImplementedOnlyInInfrastructure = classes()
+            .that().implement(resideInAPackage("..domain.port.."))
+            .should().resideInAPackage("..infrastructure..");
 }
