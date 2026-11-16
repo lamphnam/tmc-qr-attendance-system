@@ -80,6 +80,10 @@ Ordering is by sequence, not timestamp. Audit encoding and limitations: [DATA-MO
   This key is shared across demo factories; `factoryId` is a filter, **not an authorization scope**.
 - Optional `?factoryId=BD` filters the snapshot. No filter returns all factories. Returns **all statuses**, including REVOKED,
   ordered by employee ID, so a kiosk can evict revoked credentials. No global snapshot version/cursor is implemented.
+- **Agreed between Khôi and Khoa, not implemented by User/QR yet:** response header `X-Whitelist-Version`, a positive
+  `long` that increases per factory on every membership, factory-move, rotate, revoke or activate change, read in the
+  same snapshot as the body (also for `[]`). The kiosk source (`RestWhitelistSnapshotSource`) already requires it and
+  rejects a response without it. Owner of the remaining work: Khoa ([TODO §1](TODO.md#1-khoa--user-qr-service-authrbactotpaudit-gateway-integration)).
 - Sensitive shared secrets can be delivered only over trusted authenticated channel and protected at rest; never appear in web/frontend response or logs.
 - Example **structure only** (do not commit real secrets):
 
@@ -255,6 +259,16 @@ move behind `@Profile("dev")` (as `/api/dev/**`) or require the employee's JWT l
 `GET /api/v1/qr/generate` mapping: `scripts/smoke.sh` expects it to answer 501.
 
 Not recorded in [DECISIONS](DECISIONS.md) while it is a proposal; once the owners agree, record it with the `record-decision` skill.
+
+**What the merged `develop` really answers (2026-11-16, code inspection):**
+
+| Route | Today | Gap with the proposal |
+|---|---|---|
+| `GET /api/v1/qr/{empId}` (dev) | 200 `{employeeId, fullName, factoryId, qrStatus, totpCode, timeStep, issuedAt, expiresAt, remainingSeconds, secretVersion, qrTokenPayload}`; `qrTokenPayload` is the string `"<empId>:<totp>:<ver>"`. Revoked: `403 {"code":"FORBIDDEN"}` | no `qrPayload` object, no `periodSeconds`, `403` instead of `409 QR_REVOKED`: `/demo` shows `INVALID_QR_PAYLOAD` |
+| rotate / revoke / activate (dev) | implemented; body `{actorId?, actorRole?, reason?}` | matches |
+| `GET /api/v1/attendance/events?limit=` | not implemented; the only list is `GET /api/dev/attendance/history?employeeId&factoryId&fromInclusive&toExclusive&page&size`, oldest first, **fixtures excluded** | `/demo` column 3 falls back to per-id lookups; the history route cannot show synthetic events |
+| `POST /api/dev/kiosk/whitelist/sync` | not implemented (no whitelist endpoint on the kiosk) | button answers 404 |
+| `POST /api/local/scan` | 501 | Khánh: [handoff](../kiosk-agent/README.md#handoff-qr-scan-for-khánh-2026-11-16) |
 
 ## API docs deliverable
 

@@ -17,6 +17,9 @@ Cross-cutting references (do not restate them in a PR): who depends on whom and 
 |---|---|---|
 | P0 | **Auth/token contract**: JWT claims, role names matching the seeded `roles`, lifetime, how other services verify it — agree with Khiêm, Khôi, Nam | blocks every role-protected route |
 | P0 | Whitelist dev snapshot/key check exists (B21); add production kiosk identity, factory authorization, snapshot version/cursor and agree schema with Khánh | Khánh needs the cache consumer |
+| P0 | **`X-Whitelist-Version`** on `GET /api/v1/kiosk/whitelist` as agreed with Khôi ([API-CONTRACTS §2](API-CONTRACTS.md#2-get-apiv1kioskwhitelist-team-plan)): durable per-factory revision in PostgreSQL, bumped in the same transaction as rotate/revoke/activate (and any future add/delete/factory move), header and body from one snapshot even for `[]`, `factoryId` required, PostgreSQL tests. Note that a DB volume reset restarts the revision while a kiosk keeps its cached one | kiosk sync rejects every snapshot until done (Khôi, Khánh) |
+| P0 | QR response shape for `/demo` and the kiosk scan: add `qrPayload {empId, totp, ts, ver}` and `periodSeconds`; answer a revoked QR with `409 QR_REVOKED` (update `smoke.sh`/`smoke.ps1`) — gaps listed in [API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed) | Khiêm, Khánh |
+| P1 | Align the dev `KIOSK_API_KEY` default between `user-qr-service` and `kiosk-agent` in Compose (kiosk defaults to empty today) | Khôi |
 | P0 | TOTP/lifecycle employee-ID dev routes exist; wire JWT identity to `GET /api/v1/qr/generate`, approve the token contract and add employee/HR authorization | Khiêm renders it |
 | P1 | Secret protection at rest/key management (D08): current `shared_secret` holds public synthetic dev fixtures; rotation already exists | Khánh |
 | P1 | HR employee sync (FR-1.1) from `GET /mock/hr/employees` (`tmc.hr-api.base-url` configured); connect revocation to HR/authenticated UI | Nam (mock), Khiêm (HR UI) |
@@ -28,9 +31,9 @@ Cross-cutting references (do not restate them in a PR): who depends on whom and 
 
 | P | Task | Depends on |
 |---|---|---|
-| P0 | `ProcessQrScanUseCase` and a real `KioskScanController` (501 today): validate whitelist + TOTP, write the `used_tokens` row **and** the event in **one** SQLite transaction, only then call `ITurnstileAdapter` | Khoa (whitelist, secret) |
+| P0 | `ProcessQrScanUseCase` and a real `KioskScanController` (501 today): validate whitelist + TOTP, write the `used_tokens` row **and** the event in **one** SQLite transaction, only then call `ITurnstileAdapter`. Start from the [handoff](../kiosk-agent/README.md#handoff-qr-scan-for-khánh-2026-11-16) | Khoa (whitelist, secret) |
 | P0 | Pure `TotpValidatorDomainService` (inject a `Clock`), current + previous step, clock-skew boundary tests (T03) | — |
-| P0 | Whitelist pull, cache and refresh. State plainly in the report that revocation is not instant while offline | Khoa |
+| P0 | ~~Whitelist pull, cache and refresh~~ — built by Khôi behind `KIOSK_WHITELIST_SYNC_ENABLED`; the scan only reads it through `IWhitelistReader`. State plainly in the report that revocation is not instant while offline | Khoa (revision header) |
 | P1 | Decide D06 (rejected scans: separate table vs `scan_result=REJECTED`) and which ones sync, with Khôi | Khôi |
 | P1 | Switch `CENTRAL_SYNC_PATH` to the authenticated route when Khôi opens it; add kiosk → central credentials (D04) | Khôi, Khoa |
 | P1 | Heartbeat to gate-station; receive manual-open commands over the agreed channel (D11) | Khôi |
@@ -42,6 +45,8 @@ Cross-cutting references (do not restate them in a PR): who depends on whom and 
 | P | Task | Depends on |
 |---|---|---|
 | P0 | **Settle the event/sync contract with Khánh** (API-CONTRACTS §3–5, B05–B07), then open `POST /api/v1/attendance/events` and `/sync` **with authentication** (501 today; the slice uses `/api/dev/attendance/*`) | Khoa (auth), Khánh |
+| P0 | `/demo` routes from the M2 plan ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed)): `GET /api/v1/attendance/events?limit=&employeeId=` (`{events:[…]}`, newest first, fixtures included in the dev profile; the existing `/api/dev/attendance/history` excludes fixtures), and `POST /api/dev/kiosk/whitelist/sync` on the kiosk (clear error when the flag is off) | Khiêm |
+| P1 | Kiosk whitelist sync for the demo: fetch once at startup (today the first fetch waits a full interval), enable `KIOSK_WHITELIST_SYNC_ENABLED` in dev Compose, decide how a dev AES key (`KIOSK_WHITELIST_KEY_BASE64`) is provisioned; re-run your tests on JDK 21 with Docker | Khoa (revision header) |
 | P0 | Own the final ERD in `init-db/schema.sql`: confirm B01 or switch to Flyway **in one place** (D02) | everyone |
 | P1 | Reference-validation policy (does the employee/gate exist?), rejection and retention rules; accepted/rejected semantics and timezone for Nam | Nam |
 | P1 | `gate-station-service`: gate/kiosk registration, heartbeat, `GET /api/v1/gates/{id}/status` (501 today) | Khánh |
@@ -64,6 +69,7 @@ Cross-cutting references (do not restate them in a PR): who depends on whom and 
 | P | Task | Depends on |
 |---|---|---|
 | P0 | Review and merge the scaffold PR, publish the repo URL, enable minimal CI: `mvn test` on a runner **with Docker**, frontend typecheck/build, `docker compose config` | — |
+| P0 | Run `node scripts/verify.mjs` on the merged `develop` with Docker (after `docker compose down -v`, the schema changed); 31 PostgreSQL tests, smoke and integration are `NOT_RUN` there ([STATUS §17](STATUS.md#17-merged-develop-2026-11-16)) | — |
 | P1 | Confirm with Khôi the semantics B24 chose (ALLOWED-only export, `dev_fixture` excluded, Asia/Ho_Chi_Minh days and months) so D10 can move to RESOLVED | Khôi |
 | P1 | Open `GET /api/v1/reports/attendance` and `/dashboard` with authentication and roles once JWT exists (the logic already works on `/api/dev/reports/*`); measure NFR-7 ≤ 30 s on a representative dataset (T06) | Khoa (roles) |
 | P1 | HR export: open `POST /api/v1/reports/hr-export/trigger` for HR/Admin once JWT/RBAC exists (logic done on the dev route, B24–B26); decide whether late events need a supplementary batch; a real alert channel (mail) if the report needs one | Khoa (roles) |

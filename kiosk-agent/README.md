@@ -12,7 +12,7 @@ The local whitelist domain and SQLite snapshot store are implemented, including 
 
 | Route | Status |
 |---|---|
-| `POST /api/local/scan` | **NOT_IMPLEMENTED** (501). Never returns ALLOWED |
+| `POST /api/local/scan` | **NOT_IMPLEMENTED** (501). Never returns ALLOWED. Implementation brief: [handoff](#handoff-qr-scan-for-khánh-2026-11-16) |
 | `POST /api/dev/kiosk/synthetic-event` | **DEV-ONLY**. Synthetic event with **no QR/TOTP check**: commit PENDING to SQLite, *then* call the local turnstile |
 | `GET /api/dev/kiosk/queue` | **DEV-ONLY** counts + recent rows read from SQLite |
 | `POST /api/dev/kiosk/sync/run` | **DEV-ONLY** one sync pass now (a scheduler also runs every 5 s) |
@@ -162,3 +162,64 @@ the use-case/store contract. There is no extra retry loop or second sync lock.
 Tests cover lifecycle/timing, invalid/default configuration, offline and singleton concurrency, plus a real scheduled
 HTTP-mock 503 → next-cycle encrypted SQLite commit. Central's actual monotonic revision/consistent factory snapshot
 and production factory authorization still need verification; enabling the flag does not establish either.
+
+## Handoff: QR scan for Khánh (2026-11-16)
+
+Written by Nam from the merged `develop` (`d486668`) so the scan can be built tonight without re-reading every branch. It describes what exists and what the other modules expect; the design choices marked **proposal** are yours to change (tell Khiêm if the wire shape changes, and record contract changes with the `record-decision` skill).
+
+### What you can reuse as is
+
+| Need | Already in the code |
+|---|---|
+| Whitelist lookup | `IWhitelistReader.lookup(employeeId)` (implemented by `SQLiteWhitelistRepository`, always a bean). Returns `WhitelistLookup`: empty `metadata` = cache never initialised; metadata present + empty `employee` = unknown employee. Throws `WhitelistCacheException` on storage/key/integrity failure — never treat that as a miss |
+| Secret for TOTP | `WhitelistEmployee.secretMaterial()`: the **exact UTF-8 bytes** of Central's `sharedSecret` string (no Base32/Base64 decoding). This is the HMAC key User/QR uses, so codes match. It may be `null` (material unavailable) |
+| Revocation / rotation | `WhitelistEmployee.qrStatus()` (`ACTIVE`/`REVOKED`) and `secretVersion()` |
+| Durable queue + gate order | `IAttendanceLocalRepository.insertPending(...)`, then `ITurnstileAdapter.openGate(gateId)`, then `updateGateCommandStatus(...)`. Copy the order from `QueueSyntheticEventUseCase` |
+| Anti-replay table | `used_tokens(employee_id, matched_time_step, used_at)`, PK `(employee_id, matched_time_step)`, present in `sqlite/schema.sql`, unused |
+| Clock, identity | `Clock` and `KioskIdentity` beans (`KioskWiringConfig`) |
+| Request DTO | `QrScanRequestDto(gateId, direction, qrPayload{empId, totp, ts, ver})`, TOTP redacted in `toString` |
+
+### What to build
+
+1. **TOTP verification**, identical to User/QR's `TotpCodeGenerator`: RFC 6238, HMAC-SHA256, key = `secretMaterial()`, counter = `epochSecond / 30` as an 8-byte big-endian long, dynamic truncation, 6 zero-padded digits. Accept the current step and the previous one only (ADR-02), compare with `MessageDigest.isEqual`, and return the **matched step**. Use the kiosk `Clock`, never the client's `ts`.
+   **Watch the ArchUnit rule:** `KioskArchitectureTest.domainIsFrameworkFree` forbids `javax..` in `domain`, so `javax.crypto.Mac` cannot live there. Proposal: keep the window/truncation policy in `domain/service` behind a small port (e.g. an HMAC-SHA256 function) implemented in `infrastructure`. The alternative is a narrow `javax.crypto` exception like User/QR's B23, which needs a recorded decision.
+2. **One atomic write for ALLOWED**: a new port method (proposal: `boolean insertPendingWithToken(LocalAttendanceEvent event, long matchedTimeStep)`) that inserts the `used_tokens` row **and** the PENDING event in one SQLite transaction and returns `false` if the token already exists (→ `REPLAYED`, no event, no gate command). `insertPending` alone is not enough.
+3. **`ProcessQrScanUseCase`** in `application/usecase`: lookup → status/version checks → TOTP → atomic write → `openGate` → record the gate result. Measure `processingTimeMs` with `System.nanoTime()` inside the use case.
+4. **`KioskScanController`** stays transport-only: validate the body, call the use case, map the result.
+
+### Wire contract the frontend already uses
+
+`/demo` (Khiêm) sends `{"gateId":"BD-G01","direction":"IN","qrPayload":{"empId":"EMP-001","totp":"482910","ts":1763280000,"ver":1}}` and reads (`web-frontend/src/demo/scan.ts`):
+
+```json
+{"result":"ALLOWED","attendanceId":"<uuid>","gateCommand":"SENT","processingTimeMs":25,"reason":null}
+```
+
+- Answer **HTTP 200 for both ALLOWED and REJECTED**; the page only parses a 2xx body as a scan result. Use `{code, message, correlationId}` errors for malformed input (400) and an unavailable/uninitialised cache (proposal: 503, never ALLOWED).
+- `gateCommand` is a `GateCommandStatus` name. The page treats `SENT` as success and `FAILED`/`GATE_ERROR` as a problem; on REJECTED send `null` or `NOT_ATTEMPTED`.
+- `reason` on REJECTED, with the mapping the page expects:
+
+| Situation | `reason` |
+|---|---|
+| employee not in the cached snapshot | `UNKNOWN_EMPLOYEE` |
+| `qrStatus = REVOKED` | `REVOKED` |
+| `ver` ≠ cached `secretVersion` (code from before a rotate), or TOTP matches neither step | `INVALID_TOTP` (the page shows the same text for `EXPIRED`) |
+| `(employee, matched step)` already in `used_tokens` | `REPLAYED` |
+| `secretMaterial()` is null | not in the page's list yet — proposal `NO_SECRET`, agree it with Khiêm; never ALLOWED |
+
+Rejected scans (D06, open, decide with Khôi): `local_attendance_events.scan_result` already allows `REJECTED` and `attendance-processor` accepts it; reporting and the HR export count `ALLOWED` only. If you store rejected rows, do not call the turnstile and keep `gate_command_status = NOT_ATTEMPTED`.
+
+### Dependencies that are not ready (do not fake them)
+
+- **Real whitelist data in the running stack:** the kiosk fetches it only when `KIOSK_WHITELIST_SYNC_ENABLED=true`, with `KIOSK_API_KEY` and `KIOSK_WHITELIST_KEY_BASE64` set, and User/QR does **not** yet send the required `X-Whitelist-Version` header ([TODO §1](../docs/TODO.md#1-khoa--user-qr-service-authrbactotpaudit-gateway-integration)), so every real snapshot is rejected today. For tests, seed the cache through `IWhitelistSnapshotStore.replaceIfNewer(...)` with a generated AES key, as `SyncWhitelistUseCaseTest` and `SQLiteWhitelistRepositoryTest` do.
+- **QR from the employee column:** User/QR returns `totpCode`, `timeStep`, `secretVersion` and a string `qrTokenPayload`, not the `qrPayload` object `/demo` sends ([API-CONTRACTS §8](../docs/API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed)). Until Khoa adds it, test with curl: `GET /api/v1/qr/EMP-001` through the gateway gives you `totpCode` and `secretVersion` for a hand-built request.
+
+### Things that must change together when the route stops answering 501
+
+- `scripts/smoke.sh` and `scripts/smoke.ps1` expect `POST /api/local/scan` with `{}` to answer **501**; change both to the new response (e.g. 400 for `{}`).
+- `KioskAgentApplicationTest` asserts the 501 (around line 139).
+- `docs/API-CONTRACTS.md` §3, and status in `docs/STATUS.md`, `docs/TRACEABILITY.md` (`ProcessQrScanUseCase`, `TotpValidatorDomainService`, `ScanResultResponseDto` rows) and `web-frontend/src/catalog.ts`: use the `new-endpoint` and `update-status` skills.
+- Add tests: TOTP boundaries (step edge, previous step, two steps back rejected, T03), replay of the same code, revoked/unknown/rotated employee, event + token committed together (and neither on failure), PENDING committed before `openGate`, and `KioskArchitectureTest` still green.
+- Before pushing: `node scripts/verify.mjs` with Docker running (JDK 21), and report skipped counts honestly.
+
+Not claimed by this handoff: any latency number (NFR-1 is `NOT_RUN` until measured) or "zero data loss" ([limitations](../docs/DECISIONS.md#known-limitations)).
