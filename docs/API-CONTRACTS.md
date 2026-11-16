@@ -147,6 +147,67 @@ Response must acknowledge **per event** due to mixed success/failure [BASELINE-M
 
 `STORED` or `ALREADY_EXISTS` → mark SYNCED; `RETRYABLE` → retain PENDING and retry; `REJECTED_PERMANENT` → FAILED and notify. Repeated calls must not create duplicate rows. Rejected scan event schema vs attendance event must be clarified in owner sync.
 
+### Current dev ingestion behavior [DRAFT]
+
+The v1 POST routes above still return 501 without invoking ingestion. Working equivalents are
+`POST /api/dev/attendance/events` and `/api/dev/attendance/sync`, registered only with profile `dev`,
+unauthenticated; use them only with synthetic data. They write `dev_fixture=true`; neither request factory
+nor batch `kioskId` is an authenticated identity. In the current dev DTO, `kioskId` is optional metadata.
+
+| Operation | Implemented result |
+|---|---|
+| Single event, new / same ID and payload | 200 `STORED` / `ALREADY_EXISTS`, with `duplicate: false` / `true` |
+| Single event, same ID but different business payload | 409 `ATTENDANCE_ID_CONFLICT`; original row unchanged |
+| Single event, validation / DB constraint / storage failure | 400 / 422 `EVENT_REJECTED` / 503 `STORAGE_UNAVAILABLE` |
+| Valid batch envelope | 200 with per-event `results`, including failed events; never interpret 200 alone as an ACK |
+| Invalid JSON or batch envelope | 400 before processing; a batch must contain 1..500 events |
+
+Missing/invalid fields use `VALIDATION_ERROR` or `INVALID_EVENT`; unreadable JSON uses `MALFORMED_REQUEST`.
+Once deserialized, null elements and invalid event values are individually rejected; transient storage/transaction
+failures yield `RETRYABLE` for that event. Conflict/constraint failures map to `REJECTED_PERMANENT` in a batch.
+Successful per-event ACKs are returned only after that event's transaction commits; this is not one batch transaction.
+Failed items may include `reason`; read `results` by ID, not just the supplementary ID lists.
+
+Dedupe uses `attendanceId`, not `Idempotency-Key` or batch identity. Business comparison uses normalized IDs,
+direction/result and millisecond event time; `sourceKioskId` / `devFixture` metadata do not change a fact's identity.
+Retry the same fact with the same ID after a lost ACK. Dev behavior does not finalize production auth/conflict policy.
+Runnable examples and deployment limits: [processor acceptance guide](../backend-services/attendance-processor/README.md#dev-handoff-acceptance).
+
+### Dev-only attendance history [DRAFT]
+
+There is no agreed production Attendance History GET contract. The owner's requested M2 inspection route is
+`GET /api/dev/attendance/history`, registered only in Spring profile `dev`. This does not define or enable
+`GET /api/v1/attendance/history`, nor change the ingestion contracts above or reporting routes below.
+
+Required query parameters: `employeeId`, `factoryId`, `fromInclusive`, `toExclusive`.
+IDs must be nonblank. Times are ISO-8601 instants with a timezone, at millisecond precision or coarser,
+with `fromInclusive < toExclusive`; matching is `[fromInclusive, toExclusive)`.
+Optional `page` (zero-based, default 0, nonnegative int) and `size` (default 20, int 1..100).
+Rows must match both filters, exclude `dev_fixture=true`, and sort by `occurredAt ASC, attendanceId ASC`.
+Stored ALLOWED and REJECTED facts are both returned. Response 200:
+
+```json
+{
+  "events": [
+    {"attendanceId":"c5b0ff1a-2c59-4333-ac72-1b41b84e84a1","employeeId":"EMP001","factoryId":"BD",
+     "gateId":"BD-G01","direction":"IN","occurredAt":"2026-11-14T01:00:00Z","scanResult":"ALLOWED"}
+  ],
+  "page": 0, "size": 20, "hasNext": false
+}
+```
+
+No matches produce `events: []`, `hasNext: false`, retaining the requested page/size.
+`hasNext` describes the same SELECT as the returned rows; offset pages can shift between requests as data arrives.
+No total count, aggregation, or payroll interpretation is exposed.
+Missing/invalid filters, times or pagination return 400 `VALIDATION_ERROR`; database failure returns
+503 `STORAGE_UNAVAILABLE`, using the shared `{code, message, correlationId}` shape without echoed inputs.
+Success and handled query errors carry `X-TMC-Dev-Only: true` and `Cache-Control: no-store`.
+
+**Unauthenticated dev access only:** the caller's factory parameter does not grant authorization.
+Anyone who can reach this route can query any factory. Use only synthetic data in a trusted local dev environment;
+production employee identity, RBAC and factory authorization remain unimplemented and require owner review.
+The existing dev ingestion routes create fixtures and therefore do not seed these results.
+
 ## 6. Gate station endpoints [DRAFT; owner Khôi]
 
 - `POST /api/v1/gates` — register/config gate.

@@ -17,7 +17,7 @@ Status values: **OPEN** nothing chosen · **PROPOSED** the scaffold chose someth
 | D05 | P0 | Offline simulation | Stopping central ≠ WAN isolation; toggle sync or the network boundary without cutting the local turnstile | **PROPOSED** B08 |
 | D06 | P1 | Rejected-scan persistence | M1 says rejected scans are logged; define schema, retention and which events sync | **OPEN** (B11 keeps both options) |
 | D07 | P1 | Multi-kiosk anti-replay | Local `(employeeId, step)` only stops same-kiosk replay; no global anti-replay while offline | **OPEN** (limitation) |
-| D08 | P1 | Whitelist / secret protection and revocation | Secret at rest, key rotation, scoped whitelist; offline revoke is delayed until sync | **OPEN** (B12) |
+| D08 | P1 | Whitelist / secret protection and revocation | Kiosk at-rest protection implemented; key lifecycle, Central at-rest protection, cross-service secret mapping and offline revocation remain open | **OPEN** (B12; [kiosk implementation](#d08-kiosk-secret-protection-2026-11-14)) |
 | D09 | P1 | HR mock failure code | Examples say 500 and 503; handle any retryable 5xx, never one literal code | **PROPOSED** B09 |
 | D10 | P1 | HR export period and stable batch id | Define previous calendar month, duplicate manual trigger, storage and dedupe semantics | **OPEN** |
 | D11 | P1 | Remote manual-gate command | M1 wants a dedicated authenticated channel but gives no protocol; do not fake end-to-end | **OPEN** |
@@ -44,7 +44,7 @@ Added 2026-11-01 by the scaffold. Nothing here changes [BASELINE-M1] (4 services
 | B09 | D09 | Mock HR failure injection accepts **any** 4xx/5xx (`SIMULATE_HR_DOWN=503` or `PUT /mock/hr/control/failure`); nothing is stored while failing; the receiver upserts by `attendanceId` and reports `duplicateBatch` | Do not rely on one literal code | Reporting treats every 5xx/timeout as retryable | Nam |
 | B10 | D16 | Frontend = React 19 + TypeScript + Vite 7 | ARCHITECTURE default | - | Khiêm |
 | B11 | D06 | `local_attendance_events.scan_result` allows `ALLOWED` and `REJECTED` (universal-schema option) but **nothing writes REJECTED yet**; D06 stays open | Keeps both options open | - | Khánh + Khôi |
-| B12 | D07, D08 | Original bootstrap: cache/token tables unused and `employees.shared_secret_enc` NULL. The employee-secret choice is superseded by B22; kiosk tables remain unused | Do not invent crypto | See B22 | Khoa + Khánh |
+| B12 | D07, D08 | Original bootstrap: cache/token tables unused and `employees.shared_secret_enc` NULL. Kiosk whitelist persistence and AES-256-GCM protection are now implemented; see [D08 update](#d08-kiosk-secret-protection-2026-11-14). Central employee-secret storage is superseded by B22: plaintext public synthetic dev `shared_secret` only. Production `used_tokens` integration and kiosk HTTP whitelist sync remain unimplemented | Preserve bootstrap history; record later crypto/storage choices explicitly | See B22 and D08 update | Khoa + Khánh |
 | B13 | - | DATA-MODEL columns added: `attendance_events.source_kiosk_id` and `.dev_fixture` (marks rows written by dev fixtures so reports can exclude them). No FKs from `attendance_events` to employees/gates (immutable edge facts, possibly produced with a stale whitelist) | Traceability of the dev slice | Khôi may add reference validation at ingestion | Khôi |
 | B14 | D04 | All central services share one **dummy** DB credential from `.env`; no least-privilege roles (e.g. an audit table the app can INSERT but not UPDATE/DELETE, NFR-8) | Scaffold only | Khoa must add restricted roles before claiming audit tamper evidence | Khoa |
 | B15 | D04 | `SPRING_PROFILES_ACTIVE=dev` enables the unauthenticated `/api/dev/**` fixtures; Compose turns it on, every host port binds `127.0.0.1`, and the gateway forwards `/api/dev/attendance/` and `/api/dev/kiosk/` | Makes the slice demonstrable | Remove both gateway locations and the profile for any non-developer environment | Khoa |
@@ -70,7 +70,8 @@ Added 2026-11-01 by the scaffold. Nothing here changes [BASELINE-M1] (4 services
 
 Canonical list. Quote these instead of re-deriving them, and never contradict them in the report (policy: [PROJECT §5](PROJECT.md#5-claims-policy-canonical--other-docs-link-here)).
 
-- **Security is incomplete.** Dev traffic is plain HTTP, employee QR/lifecycle/audit endpoints have no JWT/RBAC, actor fields are untrusted, and all services share a dummy DB owner credential. Only the dev whitelist checks a shared kiosk key; it does not bind keys to a factory. TLS 1.3, mTLS, encryption at rest and MFA (NFR-4) are not implemented. Seed QR secrets are public dummy values.
+- **Security is incomplete.** Dev traffic is plain HTTP. Employee QR/lifecycle/audit endpoints lack JWT/RBAC, actor metadata is untrusted, and services share a dummy DB owner credential. The dev whitelist checks a shared kiosk API key without factory authorization. Kiosk whitelist material has local AES-256-GCM protection; Central `shared_secret` contains plaintext synthetic dev values only, with public dummy seed secrets. TLS 1.3, mTLS, Central encryption at rest and MFA remain unimplemented. This does not satisfy NFR-4 as a whole.
+- **Dev attendance history is unauthenticated.** The profile-gated history route accepts factory as a filter only; it provides no access control. Use synthetic records on a trusted developer machine. There is no production History GET route or approved production history authorization contract.
 - **Data durability.** SQLite WAL + `synchronous=FULL` protects against a process crash or restart, not against a physical disk failure, and depends on the filesystem. "Zero data loss" must not be claimed.
 - **Offline revocation is not instant.** A kiosk keeps a stale whitelist until its next sync. A compromised kiosk exposes the secrets of the employees assigned to it.
 - **Anti-replay is per kiosk.** `(employee_id, matched_time_step)` cannot stop reuse across kiosks while disconnected.
@@ -82,3 +83,73 @@ Canonical list. Quote these instead of re-deriving them, and never contradict th
 ## Change governance
 
 Log open decisions in this file with date, owner, chosen answer and the effect on FR/NFR/ADR, API and diagrams. Keep [BASELINE-M1] intact unless a documented ADR supersedes it with the group's approval.
+
+## D08 kiosk secret protection (2026-11-14)
+
+Implemented at the assigned user's explicit request: AES-256-GCM in kiosk Infrastructure, with an external 32-byte Base64 key (`KIOSK_WHITELIST_KEY_BASE64`), a fresh random 96-bit nonce per encryption, a 128-bit tag, a versioned local envelope and authenticated row/snapshot context. The existing SQLite repository encrypts/decrypts without changing schema, HTTP contracts, domain ports or attendance transactions. Missing keys fail secret operations; malformed key configuration, wrong keys and altered envelopes expose only fixed safe domain errors. There is no fallback to plaintext or automatic reset.
+
+Scope: the kiosk part of D08 / NFR-4 and the whitelist prerequisite for ADR-02. It does not complete FR-3.1, kiosk TOTP verification, anti-replay or NFR-4; User/QR TOTP is implemented separately (B21). Key custody/provisioning, key rotation/migration, the agreed Central-to-kiosk secret mapping and revocation policy remain for Khoa/Khánh and the team. The format version supports explicit future codecs; no keyring, key ID or legacy migration is claimed. Preserve the key externally for database recovery. Whole-database integrity/rollback detection and protection from a compromised kiosk process are outside this change. Detailed storage/error behavior: [kiosk README](../kiosk-agent/README.md#local-whitelist-key-d08).
+
+## Whitelist application boundary (2026-11-14)
+
+At the assigned user's request, `IWhitelistSnapshotSource` and `SyncWhitelistUseCase` define a local domain/application boundary before the HTTP agreement. They reuse immutable snapshots, the existing unavailable-Central/cache failures and atomic store contract. The application records its Clock time after retrieval, while only the store compares the source version against durable state under a write transaction. No separate pre-read/version check, HTTP transaction wrapper or extension to attendance sync is introduced.
+
+This application-core step did not resolve D01/D04/D08 remote-policy questions or change API/schema/M1 diagrams. Central now has the separate dev whitelist endpoint from B21, but no kiosk-side Central source adapter, whitelist scheduler or automatic use-case wiring exists. Khoa/Khánh must still agree trusted response-to-domain mapping, scope/authentication, secret material mapping and version/unchanged-response semantics: Central currently returns an employee array with per-employee secretVersion, not a global snapshot version. That employee version cannot be substituted for the store's snapshot version. The later composition root must supply one shared use-case instance and the existing switch/Clock/identity. Behavior/results and instance-local concurrency limits are described in [kiosk README](../kiosk-agent/README.md#whitelist-sync-application-boundary).
+
+## Whitelist HTTP transport boundary (2026-11-14)
+
+At the user's explicit request, kiosk Infrastructure now has an independently callable transport for B21's existing JSON array, with factory from configured identity and request-local `X-Kiosk-Api-Key`. It preserves Central's secret String exactly and performs full response validation without converting it to a domain snapshot. The separate HTTP credential comes from `KIOSK_API_KEY`; it has no relationship to the AES key. Existing shared client timeout settings are reused; no retry/scheduler or HTTP transaction wrapper is added.
+
+This implements transport, not `IWhitelistSnapshotSource` or HTTP whitelist synchronization into SQLite. A global revision is not synthesized from employee versions, timestamps, hashes or a local counter. D01/D04/D08 questions stay open. Missing credentials/HTTP/parser failures expose fixed technical reasons without body/cause diagnostics. Empty-array success cannot establish authorized factory/kiosk identity or freshness. See [transport behavior and limitations](../kiosk-agent/README.md#whitelist-http-transport-only).
+
+## Independent mapping and conditional composition (2026-11-14)
+
+The requested preparation adds wire-to-domain employee mapping using the exact UTF-8 encoding of the String; it does not decode the base64-looking text used by Central. Missing/blank HTTP secrets and unsupported wire statuses remain invalid, without changing the domain's separate nullable-material policy. No source metadata or version is created. Composition prepares a default singleton only when an existing source port bean is registered; without one, transport/mapper/cache still start independently, including with no HTTP key. No source placeholder, scheduler or HTTP write path is provided. A future source must supply valid authenticated scope/revision and be registered before conditional wiring is evaluated. D01/D04/D08 remain open; API/schema and version semantics are unchanged. Details: [mapping and wiring](../kiosk-agent/README.md#employee-mapping-and-conditional-wiring).
+
+## Dev attendance history boundary (2026-11-14)
+
+At the attendance owner's explicit request, a dev-only GET controller reuses the existing history service/read port
+and PostgreSQL query without changing ingestion, idempotency or schema. Since no production history contract exists,
+the minimal dev wire shape is recorded separately in [API-CONTRACTS](API-CONTRACTS.md#dev-only-attendance-history-draft).
+It keeps the existing non-fixture policy and bounded, stable half-open-range query; no aggregation or reporting-service work is added.
+The module remains DEV_SLICE. Factory filtering is not authorization; no mock authentication or production GET route is added.
+Production history identity/roles/scope and the cross-module contract remain open for owner review (D01/D04).
+
+## Kiosk HTTP snapshot adapter boundary (2026-11-14)
+
+The user reports Khoa's agreement on a positive long `X-Whitelist-Version`, monotonically increasing per factory
+and covering all whitelist membership/secret/status changes, with the existing array body and exact UTF-8 material.
+Kiosk now implements that mapping in an explicitly constructed `RestWhitelistSnapshotSource`, without changing
+the canonical API document, Central code or schema in this task. Earlier transport/core entries above record the
+state before that agreement; they do not describe the latest adapter availability.
+
+No real source bean, scheduler or HTTP-to-cache path is activated. The existing version guard, SQLite transactions
+and AES-GCM remain unchanged. Configured identity and factory row checks are not authorization: the dev key is still
+not factory-bound. Central must return a complete factory view and revision consistently, including an empty view;
+its actual implementation and end-to-end integration remain unverified here. See [Kiosk source boundary](../kiosk-agent/README.md#http-snapshot-source-explicit-only).
+
+## Whitelist opt-in composition (2026-11-14)
+
+The user authorizes HTTP source → existing use case → SQLite composition behind
+`KIOSK_WHITELIST_SYNC_ENABLED`, default false. Infrastructure registers the real source; the composition root
+imports that configuration and resolves its domain port through constructor injection, avoiding source-registration
+ordering requirements. Both source and use case remain singleton/back-off beans; existing explicit replacements
+are preserved. False disables the supplied pipeline beans, not independently callable transport primitives.
+
+This supersedes the earlier unregistered-source stage above without changing the version/auth contract.
+True creates a callable pipeline but supplies no scheduler, startup fetch, public route or production entrypoint.
+Explicit calls still obey the shared offline switch and commit/version guards; key/HTTP/header failures keep old cache.
+Real Central revision behavior and factory authorization remain unverified/incomplete. See [current wiring evidence](STATUS.md#15-whitelist-opt-in-wiring-2026-11-14).
+
+## Whitelist scheduler boundary (2026-11-14)
+
+The user authorizes a periodic trigger after the explicit-only wiring stage above. The existing false-by-default
+flag now gates a lifecycle-managed whitelist scheduler as well as source/use case. Default fixed delay and first
+delay are 60000 ms; deployment interval is bounded to 1000..86400000 ms to avoid busy loops or excessive delays.
+These are scheduler configuration limits, not TTL/rotation policy. No production flag is turned on by this change.
+
+A private single-thread executor avoids becoming Spring's default scheduling resource or delaying Attendance's
+existing scheduled job. Only the shared use case is called; no new sync lock, HTTP/store access or endpoint is added.
+Shutdown cancels future ticks without interrupting a commit and waits at most 10 seconds; runtime failures use fixed
+safe logs and leave later ticks alive. Existing offline, source-version and atomic replacement rules are unchanged.
+Real Central revision/auth and cross-service verification remain open. [Behavior and limits](../kiosk-agent/README.md#whitelist-scheduling).
