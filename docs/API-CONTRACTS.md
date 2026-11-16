@@ -29,16 +29,63 @@ Request: employee Bearer JWT. Browser never receives `sharedSecret`. Response [D
 - `{ts}` is contextual; kiosk must recompute trusted time step, not blindly trust timestamp from payload.
 - Refresh on client at/after step boundary. Version change blocks old secret at kiosk **after whitelist refresh**; cannot claim instant offline revocation.
 
+### Employee-ID demo routes [DRAFT, B21]
+
+Available **only with profile `dev`**, using synthetic employees. Successful responses carry
+`X-TMC-Dev-Only: true` and `Cache-Control: no-store`. Without that profile these routes
+return 501. `/qr/generate` remains 501 in every profile until employee JWT identity exists.
+These paths are retained as explicitly requested for the M2 demo; they are not authenticated production routes.
+
+- `GET /api/v1/qr/{employeeId}` returns 200 for ACTIVE, 403 `FORBIDDEN` for REVOKED,
+  404 `NOT_FOUND` for missing employees, or 503 `STORAGE_UNAVAILABLE` on DB failure.
+- `POST /api/v1/qr/{employeeId}/rotate` replaces the secret with 32 SecureRandom bytes
+  encoded as unpadded base64url, sets ACTIVE, increments `secretVersion`, and appends `ROTATE_QR_SECRET`.
+- `POST /api/v1/qr/{employeeId}/activate` does the same with audit action `ACTIVATE_QR`.
+- `POST /api/v1/qr/{employeeId}/revoke` sets REVOKED, increments the version, and appends `REVOKE_QR`.
+  Returns `{employeeId, qrStatus, secretVersion, updatedAt}`. Repeated lifecycle commands each increment
+  the version and append another event; no idempotency key is defined for these commands.
+- All three POST bodies are optional: `{ "actorId":"hr-demo", "actorRole":"HR_STAFF", "reason":"synthetic departure" }`.
+  Actor ID: 1–64 characters `[A-Za-z0-9._@-]`; role: 1–32 `[A-Z_]`; reason: at most 256 characters.
+  These are **untrusted demo metadata**, not authorization. Defaults are `DEV_OPERATOR` / `UNAUTHENTICATED_DEV`.
+  Malformed JSON/invalid fields return 400 `VALIDATION_ERROR` with no echoed values.
+- Mutations lock the employee row and commit the QR update and audit append in **one transaction**;
+  a failed audit insert rolls back both. Rotate/activate return the same QR response as GET:
+
+```json
+{
+  "employeeId":"EMP-001", "fullName":"Demo Nguyen Van An", "factoryId":"BD",
+  "qrStatus":"ACTIVE", "totpCode":"048291", "timeStep":59820480,
+  "issuedAt":"2026-11-14T00:00:00Z", "expiresAt":"2026-11-14T00:00:30Z",
+  "remainingSeconds":30, "secretVersion":1, "qrTokenPayload":"EMP-001:048291:1"
+}
+```
+
+The example code is illustrative. `timeStep = floor(epochSecond/30)`;
+`expiresAt` is the next step boundary and `remainingSeconds` is rounded up to whole seconds (1–30).
+The token is `employeeId:totpCode:secretVersion`, a **new DRAFT format**, not the existing
+`empId/totp/ts/ver` kiosk draft. Khánh must review parsing/version checks before integration.
+Six-digit codes can collide; version/status checks are required in addition to TOTP.
+No shared secret is returned to the employee. Sensitive DTO `toString()` values are redacted.
+
+`GET /api/v1/qr/audit-logs?limit=100` (dev only, range 1–200) returns newest first:
+`[{sequence, logId, timestamp, actorId, actorRole, actionType, targetResource, payloadSummary, status, previousHash, checksum}]`.
+Ordering is by sequence, not timestamp. Audit encoding and limitations: [DATA-MODEL](DATA-MODEL.md#audit-integrity-baseline-m1-nfr-8--guardrail).
+
 ## 2. GET /api/v1/kiosk/whitelist [TEAM-PLAN]
 
-- Kiosk-authenticated call; scope by `factoryId`/`kioskId` [DRAFT]. Return active/disabled employees' verification data and monotonically increasing version.
+- Production kiosk authentication/factory authorization and snapshot version remain DRAFT.
+- The dev implementation (B21) requires `X-Kiosk-Api-Key` matching server-side `KIOSK_API_KEY`.
+  Missing/wrong key returns 403; unconfigured server key returns 503 `KIOSK_AUTH_NOT_CONFIGURED`.
+  There is no default in the application; Compose supplies an obvious dummy key for synthetic data.
+  This key is shared across demo factories; `factoryId` is a filter, **not an authorization scope**.
+- Optional `?factoryId=BD` filters the snapshot. No filter returns all factories. Returns **all statuses**, including REVOKED,
+  ordered by employee ID, so a kiosk can evict revoked credentials. No global snapshot version/cursor is implemented.
 - Sensitive shared secrets can be delivered only over trusted authenticated channel and protected at rest; never appear in web/frontend response or logs.
 - Example **structure only** (do not commit real secrets):
 
 ```json
-{"version":3, "factoryId":"BD", "employees":[
-  {"employeeId":"EMP001", "qrStatus":"ACTIVE", "secretVersion":1, "sharedSecret":"<SENSITIVE-REDACTED>"}
-]}
+[{"employeeId":"EMP-001", "fullName":"Demo Nguyen Van An", "factoryId":"BD", "department":"Assembly",
+  "qrStatus":"ACTIVE", "secretVersion":1, "sharedSecret":"<SENSITIVE-REDACTED>", "updatedAt":"2026-11-14T00:00:00Z"}]
 ```
 
 ## 3. POST /api/local/scan [TEAM-PLAN]

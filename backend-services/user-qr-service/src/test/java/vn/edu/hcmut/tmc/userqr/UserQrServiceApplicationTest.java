@@ -40,7 +40,12 @@ class UserQrServiceApplicationTest {
     void everyContractStubAnswersNotImplemented() throws Exception {
         String[][] routes = {
             {"GET", "/api/v1/qr/generate"},
-            {"GET", "/api/v1/kiosk/whitelist"}
+            {"GET", "/api/v1/kiosk/whitelist"},
+            {"GET", "/api/v1/qr/EMP-001"},
+            {"POST", "/api/v1/qr/EMP-001/rotate"},
+            {"POST", "/api/v1/qr/EMP-001/revoke"},
+            {"POST", "/api/v1/qr/EMP-001/activate"},
+            {"GET", "/api/v1/qr/audit-logs"}
         };
         for (String[] route : routes) {
             mvc.perform(request(HttpMethod.valueOf(route[0]), route[1]))

@@ -2,7 +2,7 @@
 
 Môn **CO3017 Software Architecture — Assignment M2**. Kiến trúc lai **Service-based + Offline-First Kiosk** kế thừa M1: 4 service Spring Boot dùng chung 1 PostgreSQL, 1 kiosk-agent với SQLite WAL, đồng bộ HTTP REST trực tiếp, **không** message broker ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 
-> **Đây là nền code, không phải sản phẩm hoàn tất.** Mọi service build, khởi động, có health thật và nói chuyện được với nhau, nhưng chưa có đăng nhập/RBAC, TOTP, quét QR thật, báo cáo, xuất HR, audit chain. Cái gì thật và cái gì chưa: [docs/STATUS.md](docs/STATUS.md). Việc còn lại của từng người: [docs/TODO.md](docs/TODO.md). Stack này là **dev-only** (HTTP thường, không xác thực, mật khẩu giả, mô phỏng edge + central trên một máy); giới hạn cần nhắc đúng: [docs/DECISIONS.md](docs/DECISIONS.md#known-limitations).
+> **Đây là code M2 đang phát triển, chưa phải sản phẩm hoàn tất.** User/QR đã có TOTP, vòng đời QR, whitelist và audit chain trong profile dev; chưa có đăng nhập/RBAC, quét QR tại kiosk, báo cáo hay xuất HR. Trạng thái và kết quả kiểm chứng: [docs/STATUS.md](docs/STATUS.md). Việc còn lại: [docs/TODO.md](docs/TODO.md). Stack là **dev-only**, dùng dữ liệu/khóa giả và mô phỏng edge + central trên một máy; giới hạn bảo mật và vận hành: [docs/DECISIONS.md](docs/DECISIONS.md#known-limitations).
 
 ## 1. Yêu cầu
 
@@ -11,7 +11,7 @@ Môn **CO3017 Software Architecture — Assignment M2**. Kiến trúc lai **Serv
 | JDK | **21** | `JAVA_HOME` phải trỏ JDK 21. Kiểm tra bằng `mvn -v` (dòng *Java version*): Maven dùng `JAVA_HOME`, **không** dùng `java` trong `PATH` |
 | Maven | 3.9+ | Spring Boot **3.5.16** |
 | Node.js | 20.19+ (khuyến nghị 22 LTS) | frontend (Vite 7) và 2 mock |
-| Docker | Engine + Compose v2 | Docker Desktop phải **đang chạy**; cũng cần cho test Testcontainers của `attendance-processor` |
+| Docker | Engine + Compose v2 | Docker Desktop phải **đang chạy**; cần cho PostgreSQL Testcontainers của `attendance-processor` và `user-qr-service` |
 | bash + curl | tuỳ chọn | `scripts/smoke.sh`; Windows có `scripts/smoke.ps1` |
 
 ## 2. Chạy nhanh
@@ -43,13 +43,14 @@ DB ra host là 5433 (không phải 5432) vì máy dev thường đã có Postgre
 ## 4. Test
 
 ```bash
-mvn -B test                                                   # 5 module Java (JDK 21!). attendance-processor cần Docker cho PostgreSQL thật
+mvn -B test                                                   # 5 module Java (JDK 21!); User/QR và attendance cần Docker cho PostgreSQL thật
 (cd web-frontend && npm ci && npm run typecheck && npm test && npm run build)
 (cd mock-external-systems/mock-turnstile-api && npm test)
 (cd mock-external-systems/mock-hr-payroll-api && npm test)
 docker compose config --quiet
 bash scripts/smoke.sh                                         # cần stack đang chạy
 node --test tests/integration/slice.test.mjs                  # cần stack đang chạy; SKIP_DISRUPTIVE=1 để bỏ test dừng/restart container
+node --test tests/integration/user-qr.test.mjs                # QR lifecycle, whitelist và checksum; schema/seed mới
 ```
 
 **Một lệnh cho tất cả:** `node scripts/verify.mjs` chạy mọi bước trên (tự tìm JDK 21, dựng stack, smoke, integration) và in bảng kết quả trung thực (`--fast` bỏ phần Docker; log ở `.verify-logs/`). `node scripts/check-docs.mjs` kiểm tra link và độ nhất quán của markdown. `make test` chạy 3 dòng đầu. Chạy một test đơn lẻ: [CLAUDE.md](CLAUDE.md). Kết quả đã chạy thật khi dựng repo: [docs/STATUS.md](docs/STATUS.md#3-commands-run-and-results). Kế hoạch kiểm thử và tiêu chí nghiệm thu: [docs/TESTING.md](docs/TESTING.md).

@@ -1,6 +1,6 @@
 # STATUS — what exists, what was verified
 
-Snapshot of **2026-11-01** right after the bootstrap. Every result below comes from a command that was actually run on the bootstrap machine; what was not run is `NOT_TESTED`. Re-run the commands on your machine before trusting this. Requirement-level status is in [TRACEABILITY](TRACEABILITY.md); remaining work in [TODO](TODO.md); product limitations in [DECISIONS](DECISIONS.md#known-limitations).
+Bootstrap snapshot of **2026-11-01**, with User/QR implementation verified **2026-11-14** (local UTC+7 date; see §6). Earlier bootstrap results are historical. Requirement-level status is in [TRACEABILITY](TRACEABILITY.md); remaining work in [TODO](TODO.md); product limitations in [DECISIONS](DECISIONS.md#known-limitations).
 
 ## Status labels
 
@@ -30,9 +30,9 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 
 | Module | Owner | Status | Entry / health | What really works and is tested | Not there |
 |---|---|---|---|---|---|
-| `central-db` (PostgreSQL 16) | shared | **READY** | `pg_isready -h 127.0.0.1`; host `127.0.0.1:5433` | `init-db/schema.sql` + `seed.sql` load on an empty volume: 11 tables, 2 factories, 2 kiosks, 3 gates, 4 synthetic employees, 6 roles, 0 users | versioned migrations (D02/B01), restricted DB roles (B14) |
+| `central-db` (PostgreSQL 16) | shared | **READY** | `pg_isready -h 127.0.0.1`; host `127.0.0.1:5433` | canonical schema/seed tested on PostgreSQL: 11 tables, 2 factories, 2 kiosks, 3 gates, 9 synthetic employees, 6 roles, 0 users; original attendance tables preserved | versioned migrations (D02/B01), restricted DB roles (B14) |
 | `nginx-gateway` | Nam / Khoa | **READY** (routing only) | `/gateway/health` | `/services/*/health`, every `/api/v1/*` area reaches its service, JSON 404 for unknown paths (prevents a proxy loop), `X-Request-Id` | TLS/mTLS, authentication, rate limit, CORS allowlist |
-| `user-qr-service` | Khoa | **SCAFFOLD** | `/services/user-qr/health` | boots; health reflects real PostgreSQL; `GET /api/v1/qr/generate` and `/api/v1/kiosk/whitelist` answer **501** | JWT/RBAC, TOTP, whitelist, HR sync, revocation, audit chain, MFA |
+| `user-qr-service` | Khoa | **DEV_SLICE** | `/services/user-qr/health` | dev-only employee-ID QR lifecycle, RFC 6238 TOTP, key-protected whitelist, transactional audit chain; 41 module tests including 7 real PostgreSQL tests, zero skipped, also verified on Alpine. Default profile and `/qr/generate` remain 501 | JWT/RBAC, production kiosk identity/factory authorization, encryption at rest, HR sync, restricted audit DB role/external anchor, MFA; kiosk consumer not implemented |
 | `gate-station-service` | Khôi | **SCAFFOLD** | `/services/gate-station/health` | boots + real health; `POST /api/v1/gates`, `GET …/status`, `POST …/manual-open` answer **501** | registration, heartbeat, manual open + audit |
 | `attendance-processor` | Khôi | **DEV_SLICE** | `/services/attendance/health` | real idempotent ingestion: single event + batch, per-event ack after commit, SAME vs CONFLICT, 503 when the DB is down, safe under 8 threads on one id. Only via `/api/dev/attendance/*`; `/api/v1/attendance/*` answer **501** | authenticated production routes, rejected scans (D06), reference validation |
 | `reporting-service` | Nam | **SCAFFOLD** | `/services/reporting/health` | boots + real health; 3 report/dashboard/hr-export routes answer **501**; `tmc.hr-api.base-url` configured | reports, dashboard, HR export scheduler/retry |
@@ -83,3 +83,35 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 ## 5. Dev-only / mock items (must not reach a "production" build)
 
 `/api/dev/attendance/*` and `/api/dev/kiosk/*` (profile `dev`, unauthenticated) · the two matching `location` blocks in `nginx-gateway/nginx.conf` · `QueueSyntheticEventUseCase` (synthetic events, no QR/TOTP) · column `attendance_events.dev_fixture` · `mock-turnstile-api`, `mock-hr-payroll-api` · password `dev-only-change-me` · `HEALTH_SHOW_DETAILS=always` · `kiosk.central.sync-path=/api/dev/attendance/sync`.
+
+User/QR dev-only inventory (B21/B22): `/api/v1/qr/{employeeId}` and lifecycle/audit routes,
+`/api/v1/kiosk/whitelist` with a dummy kiosk key in Compose, public dummy seed QR secrets,
+untrusted actor metadata. Requested v1 paths are an explicit demo exception; no profile enables production auth.
+
+## 6. User/QR verification — 2026-11-14
+
+Windows host lacks JDK 21/Maven on PATH (JDK 23 installed; WSL has JDK 17).
+Ran Maven in `maven:3.9-eclipse-temurin-21` (Java 21.0.12.1), mounting this workspace,
+the Maven cache and Docker socket, with `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal`.
+
+- `mvn -B -ntp -pl backend-services/user-qr-service test` inside that container: **exit 0**,
+  40 tests, 0 failures/errors, **0 skipped**. Includes 7 real PostgreSQL 16 Testcontainers cases,
+  concurrent same/different employee rotations, atomic rollback on audit failure and real row tampering.
+- `node scripts/verify.mjs --down`: **exit 0**, all 8 stages passed. A temporary ignored Maven
+  command shim delegated to the JDK 21 container (the host JDK was not substituted for Java 21).
+  Used isolated `COMPOSE_PROJECT_NAME=tmc-userqr-m2`, host ports gateway 18080, frontend 13000,
+  kiosk 18085, turnstile 18090, HR 18091, PostgreSQL 15433. Fresh project volumes initialized
+  the changed schema/seed; existing `tmc-qr-attendance` volumes were not reset.
+  Results: root Java **112 tests / 0 failed / 0 errors / 0 skipped**; frontend typecheck/build
+  and **17 tests**; mock turnstile **6/6**, mock HR **11/11**; docs **0 errors / 0 warnings**;
+  Compose config and all healthchecks passed; smoke **31/31**; integration **9/9, 0 skipped**,
+  including the independent Node checksum implementation in `user-qr.test.mjs`.
+  Node TAP output made the script display `?` counts for mocks/integration; actual totals above
+  are from `.verify-logs/mocks.log` and `.verify-logs/integration.log`.
+  `docker compose down` exited **0** for the isolated project, retaining its test volumes.
+- Latest module run, including the additional safe HTTP error test:
+  `mvn -B -ntp -pl backend-services/user-qr-service test` in
+  **`maven:3.9-eclipse-temurin-21-alpine`** with the same workspace/cache/socket mounts:
+  **exit 0**, **41 tests / 0 failures / 0 errors / 0 skipped**. All seven PostgreSQL cases,
+  four architecture rules and both existing application tests ran. Mockito subclass configuration
+  works on Alpine; log: `.verify-logs/user-qr-alpine.log`.

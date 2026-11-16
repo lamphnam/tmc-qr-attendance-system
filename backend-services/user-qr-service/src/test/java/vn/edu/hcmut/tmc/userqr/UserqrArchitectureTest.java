@@ -2,6 +2,8 @@ package vn.edu.hcmut.tmc.userqr;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage;
+import static com.tngtech.archunit.base.DescribedPredicate.not;
 
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
@@ -9,8 +11,8 @@ import com.tngtech.archunit.junit.ArchTest;
 import com.tngtech.archunit.lang.ArchRule;
 
 /**
- * Guards docs/ARCHITECTURE.md "Dependency direction". Layers are optional because this module is still a scaffold:
- * the rule starts biting the moment the owner adds application/domain/infrastructure packages.
+ * Guards docs/ARCHITECTURE.md dependency direction and the framework-free domain.
+ * Standard JDK cryptography is the only javax exception (DECISIONS B23).
  */
 @AnalyzeClasses(packages = "vn.edu.hcmut.tmc.userqr", importOptions = ImportOption.DoNotIncludeTests.class)
 class UserqrArchitectureTest {
@@ -32,7 +34,20 @@ class UserqrArchitectureTest {
     static final ArchRule domainIsFrameworkFree = noClasses()
             .that().resideInAPackage("..domain..")
             .should().dependOnClassesThat().resideInAnyPackage(
-                    "org.springframework..", "jakarta..", "javax..", "java.sql..",
+                    "org.springframework..", "jakarta..", "java.sql..",
                     "com.fasterxml..", "org.postgresql..", "org.sqlite..")
             .allowEmptyShould(true);
+
+    // javax.crypto is JDK cryptography required by ADR-02, not a framework dependency (B23).
+    @ArchTest
+    static final ArchRule domainRejectsJavaxExceptJdkCrypto = noClasses()
+            .that().resideInAPackage("..domain..")
+            .should().dependOnClassesThat(resideInAnyPackage("javax..")
+                    .and(not(resideInAnyPackage("javax.crypto.."))));
+
+    @ArchTest
+    static final ArchRule applicationKnowsNoJdbc = noClasses()
+            .that().resideInAPackage("..application..")
+            .should().dependOnClassesThat().resideInAnyPackage(
+                    "java.sql..", "javax.sql..", "org.springframework.jdbc..", "org.postgresql..");
 }

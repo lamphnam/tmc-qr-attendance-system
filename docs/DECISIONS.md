@@ -1,7 +1,7 @@
 # DECISIONS — open decisions, bootstrap decisions, known limitations
 
 1. [Decision register D01–D16](#decision-register) — what the team still has to settle, with its current status.
-2. [Bootstrap decisions B01–B20](#bootstrap-decisions) — concrete choices the scaffold had to make. **Proposals**, each needs its owner's sign-off.
+2. [Bootstrap and implementation decisions](#bootstrap-decisions) — concrete choices, still **proposals** pending owner sign-off.
 3. [Known limitations](#known-limitations) — the canonical list to quote in the report and the demo.
 
 Status values: **OPEN** nothing chosen · **PROPOSED** the scaffold chose something (see the B-id), awaiting sign-off · **RESOLVED** settled as policy.
@@ -10,7 +10,7 @@ Status values: **OPEN** nothing chosen · **PROPOSED** the scaffold chose someth
 
 | ID | P | Topic | Guidance | Status |
 |---|---|---|---|---|
-| D01 | P0 | Contract fields for QR / event / sync ack | DRAFT in [API-CONTRACTS](API-CONTRACTS.md); Khoa–Khánh–Khôi must agree before parallel implementation | **PROPOSED** B04–B07 |
+| D01 | P0 | Contract fields for QR / event / sync ack | DRAFT in [API-CONTRACTS](API-CONTRACTS.md); Khoa–Khánh–Khôi must agree before parallel implementation | **PROPOSED** B04–B07, B21 |
 | D02 | P0 | DB migration owner / strategy | Shared PostgreSQL is M1; pick one migration strategy and avoid duplicate DDL | **PROPOSED** B01 |
 | D03 | P0 | Scope of Nam's bootstrap | Runnable scaffold + optional thin dev slice; never silently implement the five members' modules | **RESOLVED** (scaffold + dev slice only) |
 | D04 | P0 | Auth boundary kiosk → central | M1 expects HTTPS/mTLS; local Compose may be HTTP-only **explicitly dev-only**; kiosk endpoints must not ship open as production defaults | **OPEN** (B04, B14, B15 are dev stopgaps) |
@@ -44,7 +44,7 @@ Added 2026-11-01 by the scaffold. Nothing here changes [BASELINE-M1] (4 services
 | B09 | D09 | Mock HR failure injection accepts **any** 4xx/5xx (`SIMULATE_HR_DOWN=503` or `PUT /mock/hr/control/failure`); nothing is stored while failing; the receiver upserts by `attendanceId` and reports `duplicateBatch` | Do not rely on one literal code | Reporting treats every 5xx/timeout as retryable | Nam |
 | B10 | D16 | Frontend = React 19 + TypeScript + Vite 7 | ARCHITECTURE default | - | Khiêm |
 | B11 | D06 | `local_attendance_events.scan_result` allows `ALLOWED` and `REJECTED` (universal-schema option) but **nothing writes REJECTED yet**; D06 stays open | Keeps both options open | - | Khánh + Khôi |
-| B12 | D07, D08 | `whitelist_cache` / `used_tokens` exist in the SQLite schema but are **unused**; `employees.shared_secret_enc` is NULL; no secret material exists in the repo | Do not invent crypto | - | Khoa + Khánh |
+| B12 | D07, D08 | Original bootstrap: cache/token tables unused and `employees.shared_secret_enc` NULL. The employee-secret choice is superseded by B22; kiosk tables remain unused | Do not invent crypto | See B22 | Khoa + Khánh |
 | B13 | - | DATA-MODEL columns added: `attendance_events.source_kiosk_id` and `.dev_fixture` (marks rows written by dev fixtures so reports can exclude them). No FKs from `attendance_events` to employees/gates (immutable edge facts, possibly produced with a stale whitelist) | Traceability of the dev slice | Khôi may add reference validation at ingestion | Khôi |
 | B14 | D04 | All central services share one **dummy** DB credential from `.env`; no least-privilege roles (e.g. an audit table the app can INSERT but not UPDATE/DELETE, NFR-8) | Scaffold only | Khoa must add restricted roles before claiming audit tamper evidence | Khoa |
 | B15 | D04 | `SPRING_PROFILES_ACTIVE=dev` enables the unauthenticated `/api/dev/**` fixtures; Compose turns it on, every host port binds `127.0.0.1`, and the gateway forwards `/api/dev/attendance/` and `/api/dev/kiosk/` | Makes the slice demonstrable | Remove both gateway locations and the profile for any non-developer environment | Khoa |
@@ -53,6 +53,9 @@ Added 2026-11-01 by the scaffold. Nothing here changes [BASELINE-M1] (4 services
 | B18 | - | The mock turnstile contract (`POST /gates/{id}/open`, status, command log, failure injection) is invented here; API-CONTRACTS does not define it | Needed for the independent kiosk → turnstile test | Khánh may replace it | Khánh |
 | B19 | - | Error body everywhere is `{code, message, correlationId}`; the gateway forwards or mints `X-Request-Id` and services echo it | API-CONTRACTS conventions | - | All |
 | B20 | - | `attendance-processor` repository tests use real PostgreSQL 16 through Testcontainers and are **skipped (not faked)** without Docker | Real engines | CI needs a Docker-capable runner | Nam |
+| B21 | D01, D04, D08 | 2026-11-14, requested M2 User/QR implementation: employee-ID lifecycle, audit viewer and kiosk whitelist at the requested `/api/v1` paths **only in dev**. Default profile returns 501; `/qr/generate` remains 501 pending JWT. Whitelist uses a configured kiosk key; employee endpoints/actor metadata remain unauthenticated demo data. Array whitelist with per-employee version, colon-delimited QR token | Delivers the requested demo without silently enabling unauthenticated production routes; explicitly requested v1 paths are an exception to the dev-path convention | Before production add JWT/RBAC, kiosk identity/factory authorization, TLS and approved token/snapshot contract. No kiosk implementation changed | Khoa + Khánh + Khiêm; Nam for integration |
+| B22 | D02, D08 | 2026-11-14, requested schema/seed: plaintext **public synthetic** `shared_secret`, ACTIVE/REVOKED status, employee role and five additional IDs while retaining original fixtures. Supersedes B12 employee-secret placeholder. Audit UUID IDs, sequence ordering and SHA-256 previous-hash chain, serialized appends in the same transaction as QR mutations | Real lifecycle persistence, concurrent updates and rollback; canonical checksum encoding in DATA-MODEL; attendance tables unchanged | Empty-volume initialization only. No automatic migration/reset of existing data. Shared DB owner and no external anchor still preclude immutability claims | Khoa + Khôi + Nam; Khánh for secret format |
+| B23 | - | 2026-11-14: narrow `UserqrArchitectureTest` exception for `javax.crypto..`, part of the JDK, to implement RFC 6238 via `Mac`. All other javax dependencies remain forbidden; framework/JDBC/layer rules retained, application JDBC prohibition added | Original blanket javax ban included standard Java cryptography explicitly required by ADR-02 | No Spring/Jakarta/JDBC exception; no rule disabled | Khoa; team architecture reviewer |
 
 ## Source contrasts (do not resolve silently)
 
@@ -67,11 +70,11 @@ Added 2026-11-01 by the scaffold. Nothing here changes [BASELINE-M1] (4 services
 
 Canonical list. Quote these instead of re-deriving them, and never contradict them in the report (policy: [PROJECT §5](PROJECT.md#5-claims-policy-canonical--other-docs-link-here)).
 
-- **Security is a design intention, not a feature.** Dev traffic is plain HTTP with no authentication, a dummy shared DB credential and no MFA. TLS 1.3, mTLS, encryption at rest and MFA (NFR-4) are not implemented.
+- **Security is incomplete.** Dev traffic is plain HTTP, employee QR/lifecycle/audit endpoints have no JWT/RBAC, actor fields are untrusted, and all services share a dummy DB owner credential. Only the dev whitelist checks a shared kiosk key; it does not bind keys to a factory. TLS 1.3, mTLS, encryption at rest and MFA (NFR-4) are not implemented. Seed QR secrets are public dummy values.
 - **Data durability.** SQLite WAL + `synchronous=FULL` protects against a process crash or restart, not against a physical disk failure, and depends on the filesystem. "Zero data loss" must not be claimed.
 - **Offline revocation is not instant.** A kiosk keeps a stale whitelist until its next sync. A compromised kiosk exposes the secrets of the employees assigned to it.
 - **Anti-replay is per kiosk.** `(employee_id, matched_time_step)` cannot stop reuse across kiosks while disconnected.
-- **Audit.** A checksum alone is not immutability; it needs append-only DB privileges, hash chaining and an external anchor (B14), and the demo must say so.
+- **Audit.** User/QR now appends a SHA-256 hash chain atomically with lifecycle mutations. There is no restricted writer role or external anchor: the shared DB owner can rewrite rows/checksums or bypass the advisory lock. PUBLIC privilege revocation and the append-only port do not make the table immutable (B14/B22). The bounded viewer does not certify deletion of the tail or whole-chain completeness.
 - **The mock turnstile proves nothing physical.** HTTP 200 is not "gate opened"; mock latency is not hardware latency.
 - **A one-machine Compose stack simulates edge + central**; it is not evidence of a factory deployment, and `-Xmx192m` is not a memory claim (D15).
 - **Not measured:** NFR-1 (≤ 2 s) and NFR-7 (≤ 30 s). Anything unmeasured is `NOT_RUN`, never a number from arithmetic.

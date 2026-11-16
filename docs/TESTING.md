@@ -13,12 +13,12 @@ What must be proven and what counts as done. Commands to run things: root [READM
 | Layer | Tool | Where |
 |---|---|---|
 | Unit, Spring context, HTTP contract, layering | JUnit 5, Spring Test, ArchUnit | every Java module |
-| Real PostgreSQL 16 | Testcontainers (**skipped, not faked,** without Docker) | `attendance-processor` |
+| Real PostgreSQL 16 | Testcontainers (**skipped, not faked,** without Docker) | `attendance-processor`, `user-qr-service` |
 | Real SQLite file, real loopback HTTP | production `SqliteConfig`, JDK `HttpServer` | `kiosk-agent` |
 | Frontend | Vitest (SSR render of every route, health logic), `tsc`, Vite build | `web-frontend` |
 | Mocks | `node:test` | `mock-external-systems/*` |
 | Running stack | `scripts/smoke.sh` / `smoke.ps1` (health, DB/SQLite connectivity, routing, honest 501s) | `scripts/` |
-| Black-box slice | `tests/integration/slice.test.mjs` — asserts on PostgreSQL rows, SQLite queue, turnstile command count | `tests/integration/` |
+| Black-box slice / QR lifecycle | `slice.test.mjs` asserts on PostgreSQL rows, SQLite queue and turnstile commands; `user-qr.test.mjs` checks QR versions, whitelist and independent checksum verification | `tests/integration/` |
 | Load | placeholder only | `tests/load/` |
 | All of the above + docs check, one honest report | `scripts/verify.mjs` (`--fast` without Docker); markdown links/anchors: `scripts/check-docs.mjs` | `scripts/` |
 

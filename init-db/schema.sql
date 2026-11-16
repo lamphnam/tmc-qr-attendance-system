@@ -23,16 +23,16 @@ CREATE TABLE IF NOT EXISTS factories (
 
 -- ---- user-qr-service (owner: Khoa) -----------------------------------
 CREATE TABLE IF NOT EXISTS employees (
-    employee_id         VARCHAR(32)  PRIMARY KEY,
-    full_name           VARCHAR(150) NOT NULL,
-    department          VARCHAR(100),
-    factory_id          VARCHAR(16)  NOT NULL REFERENCES factories (factory_id),
-    qr_status           VARCHAR(16)  NOT NULL DEFAULT 'ACTIVE'
-                        CHECK (qr_status IN ('ACTIVE', 'REVOKED', 'DISABLED')),
-    secret_version      INTEGER      NOT NULL DEFAULT 1,
-    -- TODO(Khoa, D08): protected per-employee TOTP secret. Deliberately NULL in
-    -- the bootstrap: no secret material is generated or committed here.
-    shared_secret_enc   TEXT,
+    employee_id         VARCHAR(36)  PRIMARY KEY,
+    full_name           VARCHAR(120) NOT NULL,
+    department          VARCHAR(64)  NOT NULL,
+    factory_id          VARCHAR(32)  NOT NULL REFERENCES factories (factory_id),
+    role                VARCHAR(32)  NOT NULL DEFAULT 'EMPLOYEE',
+    -- B22: synthetic development data only. Encryption/key management remains D08.
+    shared_secret       VARCHAR(128) NOT NULL,
+    qr_status           VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE'
+                        CHECK (qr_status IN ('ACTIVE', 'REVOKED')),
+    secret_version      INTEGER      NOT NULL DEFAULT 1 CHECK (secret_version > 0),
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS roles (
 CREATE TABLE IF NOT EXISTS users (
     user_id       BIGSERIAL    PRIMARY KEY,
     username      VARCHAR(64)  NOT NULL UNIQUE,
-    employee_id   VARCHAR(32)  REFERENCES employees (employee_id),
+    employee_id   VARCHAR(36)  REFERENCES employees (employee_id),
     password_hash TEXT         NOT NULL,
     mfa_enabled   BOOLEAN      NOT NULL DEFAULT FALSE,
     enabled       BOOLEAN      NOT NULL DEFAULT TRUE,
@@ -56,18 +56,24 @@ CREATE TABLE IF NOT EXISTS user_roles (
     PRIMARY KEY (user_id, role_name)
 );
 
--- Tamper-evident audit log (NFR-8). Only the shape exists; the hash chain,
--- append-only DB privileges and integrity tests are Khoa's work.
+-- B22: appends are serialized by a transaction-scoped advisory lock. Sequence
+-- orders the chain even when timestamps are identical. No service exposes writes
+-- other than append. Owner/superuser can still rewrite it (D08/B14 limitations).
 CREATE TABLE IF NOT EXISTS audit_logs (
-    audit_id      BIGSERIAL    PRIMARY KEY,
-    actor_id      VARCHAR(64)  NOT NULL,
-    action        VARCHAR(64)  NOT NULL,
-    resource      VARCHAR(128),
-    detail        TEXT,
-    occurred_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    previous_hash CHAR(64),
-    checksum      CHAR(64)
+    log_id          VARCHAR(36) PRIMARY KEY,
+    audit_sequence  BIGSERIAL NOT NULL UNIQUE,
+    timestamp       TIMESTAMPTZ NOT NULL,
+    actor_id        VARCHAR(64) NOT NULL,
+    actor_role      VARCHAR(32) NOT NULL,
+    action_type     VARCHAR(64) NOT NULL,
+    target_resource VARCHAR(64) NOT NULL,
+    payload_summary TEXT,
+    status          VARCHAR(20) NOT NULL,
+    previous_hash   VARCHAR(64) NOT NULL CHECK (previous_hash ~ '^[0-9a-f]{64}$'),
+    checksum        VARCHAR(64) NOT NULL CHECK (checksum ~ '^[0-9a-f]{64}$')
 );
+
+REVOKE UPDATE, DELETE, TRUNCATE ON audit_logs FROM PUBLIC;
 
 -- ---- gate-station-service (owner: Khoi) ------------------------------
 CREATE TABLE IF NOT EXISTS kiosks (

@@ -30,7 +30,7 @@ Handoff documentation for **TMC QR Attendance & Access Control** (CO3017 Softwar
 | [DATA-MODEL](DATA-MODEL.md) | table proposals and idempotency rules — **DRAFT** (executable schema: `init-db/schema.sql`) |
 | [RUNTIME-FLOWS](RUNTIME-FLOWS.md) | sequences A–D and the error matrix |
 | [TESTING](TESTING.md) | test plan T01–T06, demo scenes, definition of done |
-| [DECISIONS](DECISIONS.md) | decision register D01–D16, bootstrap decisions B01–B20, **known limitations** |
+| [DECISIONS](DECISIONS.md) | decision register D01–D16, bootstrap/implementation decisions, **known limitations** |
 | [TRACEABILITY](TRACEABILITY.md) | FR/NFR/ADR ↔ class ↔ test with status, and the Java class map |
 | [SOLID-GUIDELINES](SOLID-GUIDELINES.md) | Pragmatic SOLID: when to apply it, per-principle guidance, anti-patterns, defence questions, the SOLID evidence table |
 | [STATUS](STATUS.md) | module status labels, per-module status, commands run and results, dev-only inventory |

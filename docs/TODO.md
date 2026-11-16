@@ -1,13 +1,13 @@
 # TODO — remaining work per member
 
 Everything here is **not done** unless [STATUS](STATUS.md) says otherwise. Priority: **P0** blocks others · **P1** · **P2**. The bootstrap provided only the foundation and a dev-only slice; it did not replace anyone's module.
-Cross-cutting references (do not restate them in a PR): who depends on whom and the interface gates → [OWNERSHIP](OWNERSHIP.md); open decisions D01–D16 and the bootstrap proposals B01–B20 → [DECISIONS](DECISIONS.md); requirement status → [TRACEABILITY](TRACEABILITY.md); what to test → [TESTING](TESTING.md); what may be claimed → [PROJECT §5](PROJECT.md#5-claims-policy-canonical--other-docs-link-here).
+Cross-cutting references (do not restate them in a PR): who depends on whom and the interface gates → [OWNERSHIP](OWNERSHIP.md); open decisions and implementation proposals → [DECISIONS](DECISIONS.md); requirement status → [TRACEABILITY](TRACEABILITY.md); what to test → [TESTING](TESTING.md); what may be claimed → [PROJECT §5](PROJECT.md#5-claims-policy-canonical--other-docs-link-here).
 
 ## 0. Everyone, now (P0, before merging features)
 
 1. Clone, `cp .env.example .env`, `docker compose up --build -d --wait`, run `scripts/smoke.sh` (or `smoke.ps1`); report failures with logs. Nam reviews the scaffold PR first.
 2. Hold a 30-minute meeting to settle the blocking contracts **D01, D02, D04** ([DECISIONS](DECISIONS.md)). When settled, edit [API-CONTRACTS](API-CONTRACTS.md) / [DATA-MODEL](DATA-MODEL.md), drop the matching DRAFT label and record it in DECISIONS.
-3. Review and accept or change the bootstrap decisions B01–B20 that concern your module.
+3. Review and accept or change the decisions that concern your module, including User/QR B21–B23.
 4. Each module has an `ArchitectureTest`: do not disable it to go faster; change a rule only with a stated reason in the PR.
 5. Order of work: happy path first (Khoa → Khánh → Khôi → Nam → Khiêm), then revoke + whitelist refresh → manual open + audit → HR export + retry → outage/restart (T02) → load test. When a step finishes, add a real test under `tests/integration/`, then update STATUS, TRACEABILITY and `web-frontend/src/catalog.ts`.
 
@@ -16,11 +16,11 @@ Cross-cutting references (do not restate them in a PR): who depends on whom and 
 | P | Task | Depends on / blocks |
 |---|---|---|
 | P0 | **Auth/token contract**: JWT claims, role names matching the seeded `roles`, lifetime, how other services verify it — agree with Khiêm, Khôi, Nam | blocks every role-protected route |
-| P0 | `GET /api/v1/kiosk/whitelist`: kiosk authentication (service key / mTLS, D04), scope by `factoryId`/`kioskId`, monotonically increasing `version`, `secretVersion`; agree the schema with Khánh | Khánh needs it for the whitelist cache and offline TOTP |
-| P0 | `GET /api/v1/qr/generate`: RFC 6238 TOTP, HMAC-SHA256, 30 s, per-employee secret **never sent to the browser**; reject revoked QR | Khiêm renders it |
-| P1 | Secret protection at rest and rotation (D08): `employees.shared_secret_enc` is NULL today | Khánh |
-| P1 | HR employee sync (FR-1.1) from `GET /mock/hr/employees` (`tmc.hr-api.base-url` is already configured); QR revocation (FR-1.4) | Nam (mock), Khiêm (HR UI) |
-| P1 | Audit log with a SHA-256 chain, an INSERT-only DB role and integrity tests (NFR-8, T04). All services currently share one dummy DB account (B14) | Khôi (manual open writes audit) |
+| P0 | Whitelist dev snapshot/key check exists (B21); add production kiosk identity, factory authorization, snapshot version/cursor and agree schema with Khánh | Khánh needs the cache consumer |
+| P0 | TOTP/lifecycle employee-ID dev routes exist; wire JWT identity to `GET /api/v1/qr/generate`, approve the token contract and add employee/HR authorization | Khiêm renders it |
+| P1 | Secret protection at rest/key management (D08): current `shared_secret` holds public synthetic dev fixtures; rotation already exists | Khánh |
+| P1 | HR employee sync (FR-1.1) from `GET /mock/hr/employees` (`tmc.hr-api.base-url` configured); connect revocation to HR/authenticated UI | Nam (mock), Khiêm (HR UI) |
+| P1 | Audit chain/rollback/concurrency tests exist for QR lifecycle. Add INSERT-only DB role, external checkpoint, retention/integrity operations and authorized viewer; integrate manual gate audit (NFR-8, T04) | Khôi; shared dummy owner is still B14 |
 | P1 | MFA for Admin/HR (NFR-4). If it will not be built, the report must say so | — |
 | P2 | Remove the two `/api/dev/*` gateway locations and the `dev` profile from any non-developer environment; add rate limiting and a CORS allowlist | — |
 
