@@ -226,6 +226,14 @@ User/QR evidence added 2026-11-14: module test command in [STATUS §8](STATUS.md
 41 tests on Alpine/JDK 21, zero skipped, including seven real PostgreSQL cases;
 the gateway/PostgreSQL integration scenario also passed with independent Node checksum verification.
 
+K1–K4 extension (2026-11-16, B27): **IMPLEMENTED — SRP/DIP** in `UserQrApplicationService` and
+`PostgresEmployeeQrRepository`: application owns employee/revision/audit transaction boundaries and snapshot
+isolation, while the existing domain repository port hides revision SQL and ordered factory locking.
+`WhitelistSnapshot` carries one revision with one immutable employee list; no new store interface is introduced.
+Cost/limit: the port now also covers membership writes, all callers must preserve its transaction/audit contract,
+and repeatable-read reads require a transaction. One PostgreSQL adapter still does not prove LSP/OCP substitution.
+Current concurrency/rollback/architecture verification: [STATUS §18](STATUS.md#18-userqr-k1k4-contract-alignment-2026-11-16).
+
 - **SRP — TESTED:** `TotpCodeGenerator` handles RFC 6238; `AuditChecksumCalculator` handles canonical
   hashing; `UserQrController` handles HTTP; `UserQrApplicationService` coordinates transactions;
   PostgreSQL repositories own SQL/locking. Domain, application, web and PostgreSQL tests exercise these separately.

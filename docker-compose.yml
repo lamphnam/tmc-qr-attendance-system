@@ -113,7 +113,7 @@ services:
       KIOSK_WHITELIST_SYNC_ENABLED: ${KIOSK_WHITELIST_SYNC_ENABLED:-false}
       KIOSK_WHITELIST_SYNC_INTERVAL_MS: ${KIOSK_WHITELIST_SYNC_INTERVAL_MS:-60000}
       KIOSK_WHITELIST_KEY_BASE64: ${KIOSK_WHITELIST_KEY_BASE64:-}
-      KIOSK_API_KEY: ${KIOSK_API_KEY:-}
+      KIOSK_API_KEY: ${KIOSK_API_KEY:-dev-only-kiosk-change-me}
       # Kiosk -> central goes through the gateway, like any other client (docs/API-CONTRACTS.md).
       CENTRAL_BASE_URL: http://nginx-gateway
       # Offline simulation (D05): true stops ONLY kiosk -> central. The local turnstile keeps working.

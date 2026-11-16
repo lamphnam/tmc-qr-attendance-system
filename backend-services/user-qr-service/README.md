@@ -16,6 +16,17 @@ Compose supplies `KIOSK_API_KEY=dev-only-kiosk-change-me`. Outside Compose expli
 the server key and send it in `X-Kiosk-Api-Key` from trusted kiosk tooling. Without a server key,
 whitelist returns 503; missing/wrong credentials return 403. Do not put this key in React.
 
+Whitelist requires `factoryId` (`[A-Za-z0-9_-]{1,16}`): missing/blank/malformed → 400 `VALIDATION_ERROR`,
+unknown factory → 404 `NOT_FOUND`. The JSON body stays an array (also `[]`); `X-Whitelist-Version` is the
+positive long factory revision, read with the body in one read-only `REPEATABLE_READ` transaction.
+Lifecycle and application-level add/delete/transfer operations commit employee, factory revision and audit together.
+Transfer increments both factory revisions in lexical lock order; same-factory transfer is a no-op.
+Membership methods do not expose an HR endpoint; direct SQL writers must maintain the revision/audit invariant.
+
+GET/rotate/activate QR responses retain every legacy field and add `periodSeconds: 30` plus
+`qrPayload: {empId, totp, ts, ver}` (issue epoch seconds, six-digit string code, int secret version).
+A revoked employee GET returns **409 `QR_REVOKED`**. DTO string representations redact TOTP/payload values.
+
 ```bash
 curl http://localhost:8080/api/v1/qr/EMP-001
 curl -X POST http://localhost:8080/api/v1/qr/EMP-001/rotate

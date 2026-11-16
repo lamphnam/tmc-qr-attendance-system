@@ -24,7 +24,7 @@ class UserQrDevUnavailableTest {
             mvc.perform(post("/api/v1/qr/EMP-001/" + action)).andExpect(status().isServiceUnavailable())
                     .andExpect(jsonPath("$.code").value("STORAGE_UNAVAILABLE"));
         }
-        mvc.perform(get("/api/v1/kiosk/whitelist")).andExpect(status().isServiceUnavailable())
+        mvc.perform(get("/api/v1/kiosk/whitelist?factoryId=BD")).andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("KIOSK_AUTH_NOT_CONFIGURED"));
     }
 }

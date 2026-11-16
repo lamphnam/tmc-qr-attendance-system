@@ -36,7 +36,7 @@ Available **only with profile `dev`**, using synthetic employees. Successful res
 return 501. `/qr/generate` remains 501 in every profile until employee JWT identity exists.
 These paths are retained as explicitly requested for the M2 demo; they are not authenticated production routes.
 
-- `GET /api/v1/qr/{employeeId}` returns 200 for ACTIVE, 403 `FORBIDDEN` for REVOKED,
+- `GET /api/v1/qr/{employeeId}` returns 200 for ACTIVE, 409 `QR_REVOKED` for REVOKED,
   404 `NOT_FOUND` for missing employees, or 503 `STORAGE_UNAVAILABLE` on DB failure.
 - `POST /api/v1/qr/{employeeId}/rotate` replaces the secret with 32 SecureRandom bytes
   encoded as unpadded base64url, sets ACTIVE, increments `secretVersion`, and appends `ROTATE_QR_SECRET`.
@@ -48,22 +48,26 @@ These paths are retained as explicitly requested for the M2 demo; they are not a
   Actor ID: 1–64 characters `[A-Za-z0-9._@-]`; role: 1–32 `[A-Z_]`; reason: at most 256 characters.
   These are **untrusted demo metadata**, not authorization. Defaults are `DEV_OPERATOR` / `UNAUTHENTICATED_DEV`.
   Malformed JSON/invalid fields return 400 `VALIDATION_ERROR` with no echoed values.
-- Mutations lock the employee row and commit the QR update and audit append in **one transaction**;
-  a failed audit insert rolls back both. Rotate/activate return the same QR response as GET:
+- Mutations lock the employee row and commit the QR update, factory `whitelist_version + 1` and audit append in
+  **one transaction**; a failed audit insert rolls back all three. Rotate/activate return the same QR response as GET:
 
 ```json
 {
   "employeeId":"EMP-001", "fullName":"Demo Nguyen Van An", "factoryId":"BD",
   "qrStatus":"ACTIVE", "totpCode":"048291", "timeStep":59820480,
   "issuedAt":"2026-11-14T00:00:00Z", "expiresAt":"2026-11-14T00:00:30Z",
-  "remainingSeconds":30, "secretVersion":1, "qrTokenPayload":"EMP-001:048291:1"
+  "remainingSeconds":30, "secretVersion":1, "qrTokenPayload":"EMP-001:048291:1",
+  "periodSeconds":30, "qrPayload":{"empId":"EMP-001", "totp":"048291", "ts":1794614400, "ver":1}
 }
 ```
 
 The example code is illustrative. `timeStep = floor(epochSecond/30)`;
 `expiresAt` is the next step boundary and `remainingSeconds` is rounded up to whole seconds (1–30).
-The token is `employeeId:totpCode:secretVersion`, a **new DRAFT format**, not the existing
-`empId/totp/ts/ver` kiosk draft. Khánh must review parsing/version checks before integration.
+All existing fields, including the legacy `qrTokenPayload` string `employeeId:totpCode:secretVersion`, are retained.
+`periodSeconds` is an int, always 30. The nested `qrPayload` has exactly four fields: `empId = employeeId`,
+six-digit String `totp = totpCode` (preserves leading zeroes), long `ts = issuedAt.getEpochSecond()`,
+int `ver = secretVersion`. The frontend draws this object as QR; `ts` is issue time, not the step counter.
+The DRAFT scan/version policy still needs Khoa–Khánh review; adding payload fields does not implement scanning.
 Six-digit codes can collide; version/status checks are required in addition to TOTP.
 No shared secret is returned to the employee. Sensitive DTO `toString()` values are redacted.
 
@@ -73,17 +77,24 @@ Ordering is by sequence, not timestamp. Audit encoding and limitations: [DATA-MO
 
 ## 2. GET /api/v1/kiosk/whitelist [TEAM-PLAN]
 
-- Production kiosk authentication/factory authorization and snapshot version remain DRAFT.
+- Production kiosk authentication/factory authorization remain DRAFT. Dev snapshot decisions: B27.
 - The dev implementation (B21) requires `X-Kiosk-Api-Key` matching server-side `KIOSK_API_KEY`.
   Missing/wrong key returns 403; unconfigured server key returns 503 `KIOSK_AUTH_NOT_CONFIGURED`.
   There is no default in the application; Compose supplies an obvious dummy key for synthetic data.
   This key is shared across demo factories; `factoryId` is a filter, **not an authorization scope**.
-- Optional `?factoryId=BD` filters the snapshot. No filter returns all factories. Returns **all statuses**, including REVOKED,
-  ordered by employee ID, so a kiosk can evict revoked credentials. No global snapshot version/cursor is implemented.
-- **Agreed between Khôi and Khoa, not implemented by User/QR yet:** response header `X-Whitelist-Version`, a positive
-  `long` that increases per factory on every membership, factory-move, rotate, revoke or activate change, read in the
-  same snapshot as the body (also for `[]`). The kiosk source (`RestWhitelistSnapshotSource`) already requires it and
-  rejects a response without it. Owner of the remaining work: Khoa ([TODO §1](TODO.md#1-khoa--user-qr-service-authrbactotpaudit-gateway-integration)).
+- Required query `?factoryId=BD`, matching `[A-Za-z0-9_-]{1,16}`. Missing, blank or malformed scope returns
+  400 `VALIDATION_ERROR`; an unknown factory returns 404 `NOT_FOUND`. Errors use `ErrorResponseDto`.
+- Success is the unchanged JSON **array**, including `[]`, containing **all statuses**, including REVOKED,
+  ordered by employee ID within that factory. `X-Whitelist-Version: <positive long>` is always present on 200,
+  including an empty snapshot. It is the persisted `factories.whitelist_version`, never sum/max of `secretVersion`.
+- Version SELECT and employee SELECT run in one read-only `REPEATABLE_READ` transaction. A concurrent commit cannot
+  pair a newer body with an older header. Rotate/revoke/activate/add/delete increment the affected factory once;
+  transfer increments both old and new factories, locking IDs in lexical order before audit append, all in one transaction.
+  Repeated lifecycle commands increment again; transfer to the same factory is a no-op. Membership application methods
+  have no public HR API yet. Direct SQL writers must follow the same revision/audit rule; no DB trigger is installed.
+- Compose passes the same dummy `KIOSK_API_KEY` default to User/QR and Kiosk. Application defaults remain empty.
+  Factory revisions reset on a fresh database volume; retained kiosk metadata requires a coordinated dev reset
+  ([limitations](DECISIONS.md#known-limitations)). Production epoch/reset policy remains open.
 - Sensitive shared secrets can be delivered only over trusted authenticated channel and protected at rest; never appear in web/frontend response or logs.
 - Example **structure only** (do not commit real secrets):
 
@@ -242,7 +253,8 @@ What reporting sends to HR (channel `rest`): `POST /mock/hr/attendance-batches` 
 
 ## 8. Demo main-flow routes [PROPOSAL Khiêm → Khoa / Khôi / Khánh, not agreed]
 
-Called by `web-frontend` `/demo` (`src/api/endpoints.ts`). Until built they answer 404/405 and the page says so; nothing on the page invents a success.
+Called by `web-frontend` `/demo` (`src/api/endpoints.ts`). QR routes now match §1 in the dev profile (B27);
+the remaining proposals below still need implementation/owner agreement. The page reports unimplemented responses honestly.
 
 | Route | Owner | Proposed shape |
 |---|---|---|
@@ -258,13 +270,14 @@ employee id could obtain that employee's current code, which defeats ADR-02. Bef
 move behind `@Profile("dev")` (as `/api/dev/**`) or require the employee's JWT like `/generate`. Keep the literal
 `GET /api/v1/qr/generate` mapping: `scripts/smoke.sh` expects it to answer 501.
 
-Not recorded in [DECISIONS](DECISIONS.md) while it is a proposal; once the owners agree, record it with the `record-decision` skill.
+The requested User/QR alignment is recorded in [DECISIONS B27](DECISIONS.md#bootstrap-decisions), pending owner review.
+The remaining proposals do not become approved contracts through that change.
 
 **What the merged `develop` really answers (2026-11-16, code inspection):**
 
 | Route | Today | Gap with the proposal |
 |---|---|---|
-| `GET /api/v1/qr/{empId}` (dev) | 200 `{employeeId, fullName, factoryId, qrStatus, totpCode, timeStep, issuedAt, expiresAt, remainingSeconds, secretVersion, qrTokenPayload}`; `qrTokenPayload` is the string `"<empId>:<totp>:<ver>"`. Revoked: `403 {"code":"FORBIDDEN"}` | no `qrPayload` object, no `periodSeconds`, `403` instead of `409 QR_REVOKED`: `/demo` shows `INVALID_QR_PAYLOAD` |
+| `GET /api/v1/qr/{empId}` (dev) | all legacy fields plus `periodSeconds:30` and `qrPayload:{empId,totp,ts,ver}` (§1); revoked: `409 {"code":"QR_REVOKED"}` | QR wire shape aligned; JWT/RBAC and real kiosk scan remain incomplete |
 | rotate / revoke / activate (dev) | implemented; body `{actorId?, actorRole?, reason?}` | matches |
 | `GET /api/v1/attendance/events?limit=` | not implemented; the only list is `GET /api/dev/attendance/history?employeeId&factoryId&fromInclusive&toExclusive&page&size`, oldest first, **fixtures excluded** | `/demo` column 3 falls back to per-id lookups; the history route cannot show synthetic events |
 | `POST /api/dev/kiosk/whitelist/sync` | not implemented (no whitelist endpoint on the kiosk) | button answers 404 |

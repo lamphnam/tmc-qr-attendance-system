@@ -10,7 +10,7 @@ Recommend explicit tables and unique keys, with separate ownership and migration
 | Table | Important fields [DRAFT] | Purpose/owner |
 |---|---|---|
 | `employees` | `employee_id VARCHAR(36) PK`, `full_name(120)`, `department(64) NOT NULL`, `factory_id(32) FK`, `role(32)`, `shared_secret(128) NOT NULL`, `qr_status ACTIVE/REVOKED`, positive `secret_version`, `updated_at` | QR; Khoa; plaintext **synthetic dev secrets only** (B22), protection at rest remains D08 |
-| `factories` | `factory_id PK`, `name` | shared reference |
+| `factories` | `factory_id VARCHAR(16) PK`, `name`, `whitelist_version BIGINT NOT NULL DEFAULT 1 CHECK (whitelist_version >= 1)` | shared reference; User/QR snapshot revision (B27) |
 | `gates` | `gate_id PK`, `factory_id`, `direction`, `status`, `kiosk_id` | Khôi |
 | `kiosks` | `kiosk_id PK`, `factory_id`, `last_heartbeat`, `status` | Khôi |
 | `attendance_events` | `attendance_id UUID PK`, `employee_id`, `factory_id`, `gate_id`, `direction`, `occurred_at`, `scan_result`, `recorded_at` | Khôi; unique ID idempotency |
@@ -20,6 +20,19 @@ Recommend explicit tables and unique keys, with separate ownership and migration
 | `users/roles/...` | subject, role/permission mappings | Khoa; six roles |
 
 **Important:** PostgreSQL schema is shared by services; don't have two services own same migrations. Choose a single `init-db/schema.sql` for demo or migrations (Flyway) with coordinated ownership. Avoid Hibernate `ddl-auto=create-drop` deleting teammates' data; never use this in a persistent demo DB.
+
+### Factory whitelist revision [DRAFT, B27]
+
+`BD` and `LA` seed at revision 1. Each User/QR lifecycle or membership mutation increments the affected
+factory revision in the same transaction as the employee write and audit append. A transfer locks and increments
+the distinct old/new factories in lexical ID order; same-factory transfer changes nothing. Audit/storage failure
+rolls back employee, revisions and audit. No trigger or duplicated service DDL is used; future HR writers must
+use the same application/repository transaction path (direct SQL outside it is not automatically tracked).
+
+The whitelist query reads the factory revision first and employees second under one read-only `REPEATABLE_READ`
+transaction. Its HTTP header represents that complete scoped array, including `[]`; it is independent of
+per-employee secret versions and is not a global cursor. Deleting the last employee keeps the factory and
+increments its revision. Fresh-volume/reset behavior: [Known limitations](DECISIONS.md#known-limitations).
 
 ## Kiosk SQLite — source of queued events [BASELINE-M1]
 

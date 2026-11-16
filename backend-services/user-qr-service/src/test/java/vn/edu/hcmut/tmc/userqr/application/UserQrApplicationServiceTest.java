@@ -9,6 +9,7 @@ import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -106,9 +107,11 @@ class UserQrApplicationServiceTest {
 
     @Test
     void exportsAllStatusesAndUsesReadOnlyAuditCapability() {
+        when(employees.findWhitelistVersion("BD")).thenReturn(OptionalLong.of(42));
         when(employees.findWhitelist("BD")).thenReturn(List.of(initial));
         when(auditQuery.findRecent(10)).thenReturn(List.of());
-        assertThat(service.exportWhitelist("BD")).containsExactly(initial);
+        assertThat(service.exportWhitelist("BD").version()).isEqualTo(42);
+        assertThat(service.exportWhitelist("BD").employees()).containsExactly(initial);
         assertThat(service.auditLogs(10)).isEmpty();
         verifyNoInteractions(audit);
     }

@@ -48,6 +48,12 @@ class UserQrControllerWebTest {
                 .andExpect(jsonPath("$.remainingSeconds").value(30))
                 .andExpect(jsonPath("$.secretVersion").value(1))
                 .andExpect(jsonPath("$.qrTokenPayload").value("EMP-001:048291:1"))
+                .andExpect(jsonPath("$.periodSeconds").value(30))
+                .andExpect(jsonPath("$.qrPayload", org.hamcrest.Matchers.aMapWithSize(4)))
+                .andExpect(jsonPath("$.qrPayload.empId").value("EMP-001"))
+                .andExpect(jsonPath("$.qrPayload.totp").value("048291"))
+                .andExpect(jsonPath("$.qrPayload.ts").value(NOW.getEpochSecond()))
+                .andExpect(jsonPath("$.qrPayload.ver").value(1))
                 .andExpect(jsonPath("$.sharedSecret").doesNotExist());
     }
 
@@ -58,6 +64,12 @@ class UserQrControllerWebTest {
         for (String action : new String[]{"rotate", "activate"}) {
             mvc.perform(post("/api/v1/qr/EMP-001/" + action)).andExpect(status().isOk())
                     .andExpect(jsonPath("$.qrTokenPayload").isString())
+                    .andExpect(jsonPath("$.periodSeconds").value(30))
+                    .andExpect(jsonPath("$.qrPayload", org.hamcrest.Matchers.aMapWithSize(4)))
+                    .andExpect(jsonPath("$.qrPayload.empId").value(QR.employeeId()))
+                    .andExpect(jsonPath("$.qrPayload.totp").value(QR.totpCode()))
+                    .andExpect(jsonPath("$.qrPayload.ts").value(QR.issuedAt().getEpochSecond()))
+                    .andExpect(jsonPath("$.qrPayload.ver").value(QR.secretVersion()))
                     .andExpect(jsonPath("$.sharedSecret").doesNotExist());
         }
         when(service.revokeQr("EMP-001", "hr-demo", "HR_STAFF", "left"))
@@ -74,7 +86,7 @@ class UserQrControllerWebTest {
     void mapsRevokedMissingAndStorageErrorsWithoutEchoingInputs() throws Exception {
         when(service.issueQr("EMP-001")).thenThrow(new QrRevokedException());
         mvc.perform(get("/api/v1/qr/EMP-001").header("X-Request-Id", "test-correlation"))
-                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("QR_REVOKED"))
                 .andExpect(jsonPath("$.correlationId").value("test-correlation"));
         when(service.issueQr("missing")).thenThrow(new EmployeeNotFoundException());
         mvc.perform(get("/api/v1/qr/missing")).andExpect(status().isNotFound())
@@ -96,14 +108,15 @@ class UserQrControllerWebTest {
 
     @Test
     void whitelistRequiresKioskCredentialAndPreservesScopeAndRevocations() throws Exception {
-        mvc.perform(get("/api/v1/kiosk/whitelist")).andExpect(status().isForbidden());
-        mvc.perform(get("/api/v1/kiosk/whitelist").header("X-Kiosk-Api-Key", "wrong"))
+        mvc.perform(get("/api/v1/kiosk/whitelist?factoryId=BD")).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/kiosk/whitelist?factoryId=BD").header("X-Kiosk-Api-Key", "wrong"))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("FORBIDDEN"));
         verifyNoInteractions(service);
-        when(service.exportWhitelist("BD")).thenReturn(List.of(EMPLOYEE,
-                EMPLOYEE.changeQr(EMPLOYEE.sharedSecret(), QrStatus.REVOKED, NOW)));
+        when(service.exportWhitelist("BD")).thenReturn(new WhitelistSnapshot(42, List.of(EMPLOYEE,
+                EMPLOYEE.changeQr(EMPLOYEE.sharedSecret(), QrStatus.REVOKED, NOW))));
         mvc.perform(get("/api/v1/kiosk/whitelist?factoryId=BD").header("X-Kiosk-Api-Key", "demo-test-key"))
                 .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(header().string("X-Whitelist-Version", "42"))
                 .andExpect(jsonPath("$[0].employeeId").value("EMP-001"))
                 .andExpect(jsonPath("$[0].fullName").value("Demo"))
                 .andExpect(jsonPath("$[0].department").value("Assembly"))
@@ -112,9 +125,24 @@ class UserQrControllerWebTest {
                 .andExpect(jsonPath("$[0].updatedAt").isString())
                 .andExpect(jsonPath("$[1].qrStatus").value("REVOKED"))
                 .andExpect(jsonPath("$[1].secretVersion").value(2));
-        when(service.exportWhitelist(null)).thenReturn(List.of());
-        mvc.perform(get("/api/v1/kiosk/whitelist").header("X-Kiosk-Api-Key", "demo-test-key"))
-                .andExpect(status().isOk()).andExpect(content().json("[]"));
+        when(service.exportWhitelist("LA")).thenReturn(new WhitelistSnapshot(Long.MAX_VALUE, List.of()));
+        mvc.perform(get("/api/v1/kiosk/whitelist?factoryId=LA").header("X-Kiosk-Api-Key", "demo-test-key"))
+                .andExpect(status().isOk()).andExpect(header().string("X-Whitelist-Version", Long.toString(Long.MAX_VALUE)))
+                .andExpect(content().json("[]"));
+    }
+
+    @Test
+    void whitelistRejectsMissingBlankMalformedAndUnknownFactory() throws Exception {
+        for (String query : new String[]{"", "?factoryId=", "?factoryId=%20", "?factoryId=BD!", "?factoryId=" + "x".repeat(17)}) {
+            mvc.perform(get("/api/v1/kiosk/whitelist" + query).header("X-Kiosk-Api-Key", "demo-test-key"))
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                    .andExpect(jsonPath("$.correlationId").isNotEmpty())
+                    .andExpect(header().doesNotExist("X-Whitelist-Version"));
+        }
+        verifyNoInteractions(service);
+        when(service.exportWhitelist("UNKNOWN")).thenThrow(new FactoryNotFoundException());
+        mvc.perform(get("/api/v1/kiosk/whitelist?factoryId=UNKNOWN").header("X-Kiosk-Api-Key", "demo-test-key"))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
     @Test
@@ -154,6 +182,7 @@ class UserQrControllerWebTest {
         mvc.perform(get("/api/v1/qr/generate")).andExpect(status().isNotImplemented())
                 .andExpect(jsonPath("$.code").value("NOT_IMPLEMENTED"));
         assertThat(QrResponseDto.from(QR).toString()).doesNotContain(QR.totpCode(), QR.qrTokenPayload());
+        assertThat(QrResponseDto.from(QR).qrPayload().toString()).doesNotContain(QR.totpCode());
         assertThat(WhitelistEmployeeDto.from(EMPLOYEE).toString()).doesNotContain(EMPLOYEE.sharedSecret());
         assertThat(EMPLOYEE.toString()).doesNotContain(EMPLOYEE.sharedSecret());
     }

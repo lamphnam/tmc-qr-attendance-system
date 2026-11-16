@@ -100,9 +100,11 @@ Expect 'mock-hr serves synthetic employees'     GET "$Hr/mock/hr/employees"  200
 
 Write-Host '[4] every /api/v1 area is routed to its owning service (501 JSON = reached Spring, not an nginx 404)'
 Expect 'user-qr    GET  /api/v1/qr/generate'            GET  "$Gateway/api/v1/qr/generate"            501 '"code":"NOT_IMPLEMENTED"'
-Expect 'user-qr whitelist rejects missing kiosk key'   GET  "$Gateway/api/v1/kiosk/whitelist"        403 '"code":"FORBIDDEN"'
+Expect 'user-qr whitelist rejects missing kiosk key'   GET  "$Gateway/api/v1/kiosk/whitelist?factoryId=BD" 403 '"code":"FORBIDDEN"'
 Expect 'user-qr dev QR uses seeded employee'           GET  "$Gateway/api/v1/qr/EMP-001"             200 '"qrStatus":"ACTIVE"'
-Expect 'user-qr dev QR denies revoked employee'        GET  "$Gateway/api/v1/qr/EMP-005"             403 '"code":"FORBIDDEN"'
+Expect 'user-qr dev QR denies revoked employee'        GET  "$Gateway/api/v1/qr/EMP-005"             409 '"code":"QR_REVOKED"'
+Expect 'user-qr dev QR has period'                     GET  "$Gateway/api/v1/qr/EMP-001"             200 '"periodSeconds":30'
+Expect 'user-qr dev QR has nested payload'             GET  "$Gateway/api/v1/qr/EMP-001"             200 '"qrPayload":{"empId":"EMP-001"'
 Expect 'gate       POST /api/v1/gates'                  POST "$Gateway/api/v1/gates"                  501 '"code":"NOT_IMPLEMENTED"' '{}'
 Expect 'gate       GET  /api/v1/gates/BD-G01/status'    GET  "$Gateway/api/v1/gates/BD-G01/status"    501 '"code":"NOT_IMPLEMENTED"'
 Expect 'attendance POST /api/v1/attendance/events'      POST "$Gateway/api/v1/attendance/events"     501 '"code":"NOT_IMPLEMENTED"' '{}'

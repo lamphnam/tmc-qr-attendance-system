@@ -1,6 +1,6 @@
 # STATUS — what exists, what was verified
 
-Bootstrap snapshot of **2026-11-01**, with later verification records dated **2026-11-14** (local UTC+7); the `reporting-service` row and §3 commands 16–18 were added on **2026-11-15** (branch `feat/reporting-service`, run before the merge with User/QR and Kiosk); the `web-frontend` row and §3 commands 19–23 (numbered 16–20 on branch `feat/frontend-main-flow`) on **2026-11-14**. All four feature branches were merged into `develop` on **2026-11-16**; the only run on the merged tree is [§17](#17-merged-develop-2026-11-16). The Kiosk and User/QR results in §§6–8 belong to separate pre-merge snapshots and must not be added together. Latest Attendance Processor handoff evidence: [§13](#13-attendance-processor-postgresql-recheck-2026-11-14); this module run does not establish a new whole-system result. Earlier runs remain historical. Requirement-level status is in [TRACEABILITY](TRACEABILITY.md); remaining work in [TODO](TODO.md); product limitations in [DECISIONS](DECISIONS.md#known-limitations).
+Bootstrap snapshot of **2026-11-01**, with later verification records dated **2026-11-14** (local UTC+7); the `reporting-service` row and §3 commands 16–18 were added on **2026-11-15** (branch `feat/reporting-service`, run before the merge with User/QR and Kiosk); the `web-frontend` row and §3 commands 19–23 (numbered 16–20 on branch `feat/frontend-main-flow`) on **2026-11-14**. All four feature branches were merged into `develop` on **2026-11-16**; the initial merged run is [§17](#17-merged-develop-2026-11-16), followed by K1–K4 alignment and verification in [§18](#18-userqr-k1k4-contract-alignment-2026-11-16). The Kiosk and User/QR results in §§6–8 belong to separate pre-merge snapshots and must not be added together. Latest Attendance Processor handoff evidence: [§13](#13-attendance-processor-postgresql-recheck-2026-11-14); this module run does not establish a new whole-system result. Earlier runs remain historical. Requirement-level status is in [TRACEABILITY](TRACEABILITY.md); remaining work in [TODO](TODO.md); product limitations in [DECISIONS](DECISIONS.md#known-limitations).
 
 ## Status labels
 
@@ -32,17 +32,17 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 |---|---|---|---|---|---|
 | `central-db` (PostgreSQL 16) | shared | **READY** | `pg_isready -h 127.0.0.1`; host `127.0.0.1:5433` | canonical schema/seed tested on PostgreSQL: 11 tables, 2 factories, 2 kiosks, 3 gates, 9 synthetic employees, 6 roles, 0 users; original attendance tables preserved | versioned migrations (D02/B01), restricted DB roles (B14) |
 | `nginx-gateway` | Nam / Khoa | **READY** (routing only) | `/gateway/health` | `/services/*/health`, every `/api/v1/*` area reaches its service, JSON 404 for unknown paths (prevents a proxy loop), `X-Request-Id` | TLS/mTLS, authentication, rate limit, CORS allowlist |
-| `user-qr-service` | Khoa | **DEV_SLICE** | `/services/user-qr/health` | dev-only employee-ID QR lifecycle, RFC 6238 TOTP, key-protected whitelist, transactional audit chain; pre-merge 41 module tests including 7 real PostgreSQL tests, zero skipped, also verified on Alpine. Default profile and `/qr/generate` remain 501 | JWT/RBAC, production kiosk identity/factory authorization, Central encryption at rest, HR sync, restricted audit DB role/external anchor, MFA; the `X-Whitelist-Version` header the kiosk consumer requires (so real kiosk sync fails today), the `qrPayload`/`409 QR_REVOKED` shape `/demo` expects ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed)) |
+| `user-qr-service` | Khoa | **DEV_SLICE** | `/services/user-qr/health` | dev-only employee-ID QR lifecycle, RFC 6238 TOTP, key-protected factory whitelist, transactional audit chain; K1–K4 implementation and current verification in §18. Required factory scope, consistent `X-Whitelist-Version` including empty arrays, `qrPayload`, `periodSeconds:30`, `409 QR_REVOKED`. Default profile and `/qr/generate` remain 501 | JWT/RBAC, production kiosk identity/factory authorization, Central encryption at rest, HR sync/public membership API, restricted audit DB role/external anchor, MFA |
 | `gate-station-service` | Khôi | **SCAFFOLD** | `/services/gate-station/health` | boots + real health; `POST /api/v1/gates`, `GET …/status`, `POST …/manual-open` answer **501** | registration, heartbeat, manual open + audit |
 | `attendance-processor` | Khôi | **DEV_SLICE** | `/services/attendance/health` | real idempotent ingestion and dev-only history GET via `/api/dev/attendance/*`; history reuses the bounded employee/factory/time query, excludes fixtures, and has no authorization. Latest verification: §13; earlier Docker skips: §12. Production ingestion POST routes answer **501**; no production History GET route | authenticated production routes, authorized history access, end-to-end rejected scans (D06), reference-validation policy |
 | `reporting-service` | Nam | **DEV_SLICE** | `/services/reporting/health` | (2026-11-15, §3 rows 16–18) factory report and dashboard in Asia/Ho_Chi_Minh days, ALLOWED-only, fixtures excluded unless opted in; monthly HR export with a period-derived `batch_uuid`, frozen items, 01:00 schedule with catch-up, backoff until created + 5 h, FAILED + log alert, compare-and-set claims; two payroll channels (`rest`, `file`) under one contract test. Only via `/api/dev/reports/*`; `/api/v1/reports/*` answer **501** | authentication/roles, shift dimension, mail alert, re-export of late events, NFR-7 measurement |
-| `kiosk-agent` | Khánh | **DEV_SLICE** | `/services/kiosk/health`; host `8085` | SQLite WAL + `synchronous=FULL`; PENDING committed before the turnstile call; sync by per-id ack with backoff; FAILED only on a per-event rejection; the offline switch cuts only kiosk → central; health reads the real SQLite file. Whitelist domain, atomic SQLite snapshots and local AES-256-GCM secret protection implemented (D08 update below); HTTP whitelist source, use case and scheduler exist behind `KIOSK_WHITELIST_SYNC_ENABLED` (default false), tested against mock Central only (§§14–16). `POST /api/local/scan` answers **501** | QR scan, TOTP verification, anti-replay (`used_tokens` table unused), rejected scans (handoff: [kiosk README](../kiosk-agent/README.md#handoff-qr-scan-for-khánh-2026-11-16)); sync with the real User/QR (missing revision header); startup fetch; dev AES key; key lifecycle, heartbeat, manual open, auth to central |
+| `kiosk-agent` | Khánh | **DEV_SLICE** | `/services/kiosk/health`; host `8085` | SQLite WAL + `synchronous=FULL`; PENDING committed before the turnstile call; sync by per-id ack with backoff; FAILED only on a per-event rejection; the offline switch cuts only kiosk → central; health reads the real SQLite file. Whitelist domain, atomic SQLite snapshots and local AES-256-GCM secret protection implemented (D08 update below); HTTP source/use case/scheduler behind `KIOSK_WHITELIST_SYNC_ENABLED` (default false), mock Central tests in §§14–16; B27 supplies the real Central revision header (§18). `POST /api/local/scan` answers **501** | QR scan, TOTP verification, anti-replay (`used_tokens` table unused), rejected scans (handoff: [kiosk README](../kiosk-agent/README.md#handoff-qr-scan-for-khánh-2026-11-16)); startup fetch; dev AES key provisioning; key lifecycle, heartbeat, manual open, production auth to central |
 | `mock-turnstile-api` | Khánh | **MOCK** | `/health`; host `8090` | `POST /gates/{id}/open`, command counting, failure injection; always `physicalOpenConfirmed:false` | contract is invented by the bootstrap (B18) |
 | `mock-hr-payroll-api` | Nam | **MOCK** | `/health`; host `8091` | idempotent upsert by `attendanceId`, `duplicateBatch`, 4xx/5xx injection, state survives a container restart, `GET /mock/hr/employees` | HR contract is DRAFT (D09/D10) |
-| `web-frontend` | Khiêm | **DEV_SLICE** | `/` (gateway 8080 or host 3000); `/demo` | *Status* page (real health every 10 s), *Dev slice* page, five placeholders labelled **Not implemented**. **`/demo`** (2026-11-14): one standalone page with three columns — employee QR (drawn as a QR image), kiosk (scan, offline switch, sync, SQLite queue) and central (PostgreSQL rows, resend proving no duplicate). Columns 2–3 work against the real stack through `/api/dev/kiosk/*` and `/api/dev/attendance/*`; the QR, rotate/revoke, central list and whitelist-sync routes are proposals ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed)) and the page shows their 404/405/501 as such. 118 Vitest tests; opened in Chrome (1440/1366/1280/390 px) | login, real QR (needs Khoa's route), real scan (`/api/local/scan` is 501), Guard/HR/Admin pages, dashboard with business data |
-| `tests/integration` | Nam | **READY** (dev slice) | see README §4 | `slice.test.mjs` 8, `user-qr.test.mjs` 1, `reporting.test.mjs` 3, each passed on its own branch; not yet run on the merged `develop` (§17) | tests for the real features (owners add) |
+| `web-frontend` | Khiêm | **DEV_SLICE** | `/` (gateway 8080 or host 3000); `/demo` | *Status* page (real health every 10 s), *Dev slice* page, five placeholders labelled **Not implemented**. `/demo` has employee QR image, kiosk controls/queue and central inspection. User/QR's dev response now matches the QR payload/period/revoked-code expectations (§18); offline/sync/queue and per-id central lookup use real dev endpoints. Central list and explicit whitelist-sync routes remain proposals ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed)). 118 Vitest tests re-run in §18; historical Chrome layout checks (1440/1366/1280/390 px) in §3 | login, real scan (`/api/local/scan` is 501), Guard/HR/Admin pages, dashboard with business data; no new browser visual QA in §18 |
+| `tests/integration` | Nam | **READY** (dev slice) | see README §4 | §18: `slice.test.mjs` 8, `user-qr.test.mjs` 2, `reporting.test.mjs` 3; all pass sequentially on the K1–K4 tree, no skips | end-to-end real scan/auth tests (owners add) |
 | `tests/load` | Nam | **NOT_IMPLEMENTED** | — | README + `health-baseline.js` (**NOT_TESTED**, k6 not installed) | NFR-1 / NFR-7 |
-| `scripts/smoke.sh`, `smoke.ps1` | Nam | **READY** | — | non-zero exit on any failure; 29 checks at bootstrap, 31 on the User/QR and reporting branches; not yet run on the merged `develop` (§17) | — |
+| `scripts/smoke.sh`, `smoke.ps1` | Nam | **READY** | — | §18: 35 checks per script, exit 0; non-zero exit on any failure | — |
 | `Makefile` | Nam | **READY** (partly) | — | run through `make`: `help`, `config`, `smoke`, `check-java` (refuses JDK 17, accepts 21). `test`, `up`, `integration`, `reset` not run through `make` (the commands behind them were run directly) | — |
 
 ## 3. Commands run and results
@@ -351,4 +351,54 @@ không cảnh báo dòng trùng hoặc lỗi whitespace. Không chạy Docker Co
 
 `NOT_RUN` on the merged tree: Testcontainers, `docker compose up`, smoke, integration (`slice`, `user-qr`, `reporting`). The schema of `employees`, `audit_logs` and `hr_export_*` changed, so an existing volume needs `docker compose down -v` before `node scripts/verify.mjs`.
 
-Known cross-module gaps on this tree (code inspection, not test failures): User/QR sends no `X-Whitelist-Version`, so enabled kiosk whitelist sync rejects every snapshot; `/demo` expects a QR shape, a revoked code, a central event list and a kiosk whitelist-sync route that do not exist yet ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed)); `POST /api/local/scan` still answers 501. Owners and tasks: [TODO](TODO.md).
+Known cross-module gaps at that pre-K1–K4 snapshot (code inspection, not test failures): User/QR sent no `X-Whitelist-Version`; `/demo` expected a QR shape and revoked code that User/QR did not return. These User/QR gaps are addressed in §18. The central event list and kiosk whitelist-sync endpoint remain absent ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed)); `POST /api/local/scan` still answers 501. Owners and tasks: [TODO](TODO.md).
+
+## 18. User/QR K1–K4 contract alignment (2026-11-16)
+
+Module vẫn **DEV_SLICE**, không đổi nhãn dashboard. Theo yêu cầu người dùng (B27), `factories.whitelist_version`
+khởi tạo 1, tăng cùng transaction employee/audit cho lifecycle/thêm/xóa và cả hai phía chuyển factory.
+Khóa factory theo thứ tự ID; chuyển về chính factory hiện tại là no-op. Snapshot bắt buộc `factoryId`,
+đọc header/body cùng read-only `REPEATABLE_READ`, giữ JSON array kể cả `[]`. QR giữ trường cũ, thêm
+`periodSeconds:30`, `qrPayload:{empId,totp,ts,ver}`; revoked GET trả `409 QR_REVOKED`.
+Compose truyền cùng dummy kiosk key cho hai service. Production identity/factory authorization vẫn thiếu.
+
+Kiểm thử lần này dùng Docker project riêng `tmc-k1-k4-review`, volume mới và cổng riêng; không reset volume cũ.
+Các cổng gateway/frontend/kiosk/turnstile/HR/PostgreSQL lần lượt là 28080/23000/28085/28090/28091/25433.
+`KIOSK_WHITELIST_SYNC_ENABLED=true`, interval 1000 ms và AES key giả (32 byte 1..32) chỉ truyền qua môi trường
+kiểm thử; Compose mặc định vẫn tắt whitelist sync. `KIOSK_API_KEY` dùng giá trị giả của `.env.example`.
+JUnit chạy trong `maven:3.9-eclipse-temurin-21` (Temurin 21.0.12.1), mount repo vào `/workspace`, cache Maven
+vào `/root/.m2/repository`, socket `/var/run/docker.sock`, và `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal`.
+Lượt User/QR cuối dùng thêm `JAVA_TOOL_OPTIONS=-XX:ActiveProcessorCount=2`. Log: `.verify-logs/k1-*`.
+
+Lệnh và kết quả đã xác nhận:
+
+- `mvn -B -ntp test` (root, trong container): **exit 0**, **611/611**, fail/error/skip **0**:
+  User/QR 48, Gate 4, Attendance 110, Reporting 89, Kiosk 360. Bao gồm 13 architecture tests và 37 PostgreSQL tests thật.
+  Lượt full reactor bắt đầu trước ba ca tham số bổ sung; toàn bộ User/QR cuối được chạy lại ngay bên dưới.
+- `mvn -B -ntp -pl backend-services/user-qr-service test` (container mới): **exit 0**, **51/51**, fail/error/skip **0**,
+  gồm **16 PostgreSQL thật**, **9 web**, **4 architecture**. Lượt này bổ sung kiểm tra rollback cả rotate/revoke/activate
+  và snapshot ban đầu rỗng khi writer thêm nhân viên giữa hai SELECT. Focused run là tập con, không cộng lặp.
+- `docker compose --env-file .env.example -p tmc-k1-k4-review build`, rồi `up --no-build -d --wait`
+  (với project/cổng/key test ở trên): **exit 0 / 0**, đủ 10 container healthy.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1` và Git Bash `scripts/smoke.sh`:
+  **exit 0 / 0**, **35/35 mỗi script**.
+- `node --test tests/integration/user-qr.test.mjs`: **exit 0**, **2/2**; `slice.test.mjs`: **exit 0**, **8/8**;
+  `reporting.test.mjs`: **exit 0**, **3/3**. Chạy tuần tự, không dùng `SKIP_DISRUPTIVE`; không skip.
+- Helper `KioskSnapshotCheck.java` chạy bằng JDK 21 + sqlite-jdbc, cùng UID Kiosk, kết nối SQLite `mode=ro`:
+  **exit 0**; revision và tổng số dòng cache có secret mã hóa khớp factory BD trong Central thật sau HTTP sync.
+  Đây là kiểm tra metadata/cache, không phải scan/TOTP hay xác nhận cổng vật lý.
+- Trong `web-frontend`: `npm ci`, `npm run typecheck`, `npm test`: **exit 0 / 0 / 0**, **118/118** (10 files).
+  Build frontend cũng chạy thật trong Compose image build ở trên.
+- `docker compose --env-file .env.example config --quiet`, `node scripts/check-docs.mjs`, `git diff --check`:
+  **exit 0 / 0 / 0**. `node --check tests/integration/user-qr.test.mjs`: **exit 0**.
+- `docker compose -p tmc-k1-k4-review down`: **exit 0**, gỡ container/network test, **giữ volume**; stack ban đầu không đổi.
+
+Các lần thử trước khi sửa môi trường được giữ log: smoke ban đầu 33/35 (exit 1), reporting 0/3 (exit 1) do dùng
+image reporting cũ; build lại toàn bộ source rồi chạy lại đạt kết quả trên. Vitest ban đầu bị sandbox `EPERM`,
+sau đó thiếu `qrcode.react` trong `node_modules` cũ; chạy quyền phù hợp và `npm ci` theo lockfile đã khắc phục,
+không sửa dependency/source frontend. Phép đọc volume SQLite mount read-only ban đầu không tạo được shared-memory
+lock của WAL; helper cuối dùng kết nối DB chỉ đọc trên volume cho phép tạo lock, không ghi dữ liệu nghiệp vụ.
+
+Contract vẫn DRAFT và cần reviewer Khoa–Khánh–Khiêm cùng owner schema/integration (B27). Schema chỉ áp dụng trên
+volume rỗng; reset Central làm revision trở lại 1, cần phối hợp cache Kiosk ([Known limitations](DECISIONS.md#known-limitations)).
+Các label module giữ nguyên; không tuyên bố production auth, HR sync, scan/TOTP Kiosk hay NFR hiệu năng đã hoàn tất.

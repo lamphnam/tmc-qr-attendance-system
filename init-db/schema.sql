@@ -18,7 +18,8 @@
 -- ---- shared reference ------------------------------------------------
 CREATE TABLE IF NOT EXISTS factories (
     factory_id  VARCHAR(16)  PRIMARY KEY,
-    name        VARCHAR(100) NOT NULL
+    name        VARCHAR(100) NOT NULL,
+    whitelist_version BIGINT NOT NULL DEFAULT 1 CHECK (whitelist_version >= 1)
 );
 
 -- ---- user-qr-service (owner: Khoa) -----------------------------------

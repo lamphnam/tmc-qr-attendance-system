@@ -13,6 +13,8 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.transaction.TransactionException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import vn.edu.hcmut.tmc.userqr.domain.exception.*;
 import vn.edu.hcmut.tmc.userqr.presentation.dto.ErrorResponseDto;
@@ -24,18 +26,24 @@ public class ApiExceptionHandler {
         return error(HttpStatus.NOT_FOUND, "NOT_FOUND", "Employee was not found", request);
     }
 
-    @ExceptionHandler(QrRevokedException.class)
-    ResponseEntity<ErrorResponseDto> revoked(HttpServletRequest request) {
-        return error(HttpStatus.FORBIDDEN, "FORBIDDEN", "Employee QR has been revoked", request);
+    @ExceptionHandler(FactoryNotFoundException.class)
+    ResponseEntity<ErrorResponseDto> missingFactory(HttpServletRequest request) {
+        return error(HttpStatus.NOT_FOUND, "NOT_FOUND", "Factory was not found", request);
     }
 
-    @ExceptionHandler(QrStorageException.class)
+    @ExceptionHandler(QrRevokedException.class)
+    ResponseEntity<ErrorResponseDto> revoked(HttpServletRequest request) {
+        return error(HttpStatus.CONFLICT, "QR_REVOKED", "Employee QR has been revoked", request);
+    }
+
+    @ExceptionHandler({QrStorageException.class, TransactionException.class})
     ResponseEntity<ErrorResponseDto> storage(HttpServletRequest request) {
         return error(HttpStatus.SERVICE_UNAVAILABLE, "STORAGE_UNAVAILABLE", "QR storage is unavailable", request);
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class,
-            ConstraintViolationException.class, HandlerMethodValidationException.class, MethodArgumentTypeMismatchException.class})
+            ConstraintViolationException.class, HandlerMethodValidationException.class, MethodArgumentTypeMismatchException.class,
+            MissingServletRequestParameterException.class})
     ResponseEntity<ErrorResponseDto> validation(HttpServletRequest request) {
         return error(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Request validation failed", request);
     }

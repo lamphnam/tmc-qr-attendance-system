@@ -30,7 +30,7 @@ public class KioskWhitelistController {
     @GetMapping("/api/v1/kiosk/whitelist")
     public ResponseEntity<List<WhitelistEmployeeDto>> whitelist(
             @RequestHeader(value = "X-Kiosk-Api-Key", required = false) String credential,
-            @RequestParam(required = false) @Pattern(regexp = "[A-Za-z0-9_-]{1,32}") String factoryId) {
+            @RequestParam @Pattern(regexp = "[A-Za-z0-9_-]{1,16}") String factoryId) {
         if (kioskApiKey.isBlank()) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Kiosk credential is not configured");
         }
@@ -38,6 +38,9 @@ public class KioskWhitelistController {
                 credential.getBytes(StandardCharsets.UTF_8))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Kiosk credential is required");
         }
-        return UserQrController.demo(service.exportWhitelist(factoryId).stream().map(WhitelistEmployeeDto::from).toList());
+        var snapshot = service.exportWhitelist(factoryId);
+        return ResponseEntity.ok().header("Cache-Control", "no-store").header("Pragma", "no-cache")
+                .header("X-TMC-Dev-Only", "true").header("X-Whitelist-Version", Long.toString(snapshot.version()))
+                .body(snapshot.employees().stream().map(WhitelistEmployeeDto::from).toList());
     }
 }

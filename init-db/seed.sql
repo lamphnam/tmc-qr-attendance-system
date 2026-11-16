@@ -4,9 +4,9 @@
 -- Applied once on a clean volume, right after schema.sql (alphabetical order).
 -- =====================================================================
 
-INSERT INTO factories (factory_id, name) VALUES
-    ('BD', 'Binh Duong (demo)'),
-    ('LA', 'Long An (demo)')
+INSERT INTO factories (factory_id, name, whitelist_version) VALUES
+    ('BD', 'Binh Duong (demo)', 1),
+    ('LA', 'Long An (demo)', 1)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO kiosks (kiosk_id, factory_id) VALUES
