@@ -1,10 +1,12 @@
-import { NavLink, Route, Routes } from 'react-router-dom';
+import { NavLink, Outlet, Route, Routes } from 'react-router-dom';
 import { AREAS } from './catalog';
+import { DEMO_PATH } from './demo/config';
 import Dashboard from './pages/Dashboard';
 import DevSlice from './pages/DevSlice';
+import MainFlowDemo from './pages/MainFlowDemo';
 import NotImplemented from './pages/NotImplemented';
 
-export default function App() {
+function ScaffoldLayout() {
   return (
     <div className="shell">
       <header className="topbar">
@@ -20,18 +22,28 @@ export default function App() {
             </NavLink>
           ))}
           <NavLink to="/dev/slice">Dev slice</NavLink>
+          <NavLink to={DEMO_PATH}>Main flow demo</NavLink>
         </nav>
       </header>
       <main>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          {AREAS.map((area) => (
-            <Route key={area.path} path={area.path} element={<NotImplemented area={area} />} />
-          ))}
-          <Route path="/dev/slice" element={<DevSlice />} />
-          <Route path="*" element={<p>Unknown page.</p>} />
-        </Routes>
+        <Outlet />
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path={DEMO_PATH} element={<MainFlowDemo />} />
+      <Route element={<ScaffoldLayout />}>
+        <Route path="/" element={<Dashboard />} />
+        {AREAS.map((area) => (
+          <Route key={area.path} path={area.path} element={<NotImplemented area={area} />} />
+        ))}
+        <Route path="/dev/slice" element={<DevSlice />} />
+        <Route path="*" element={<p>Unknown page.</p>} />
+      </Route>
+    </Routes>
   );
 }

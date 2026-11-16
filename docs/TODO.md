@@ -53,8 +53,9 @@ Cross-cutting references (do not restate them in a PR): who depends on whom and 
 | P | Task | Depends on |
 |---|---|---|
 | P0 | Agree with Khoa the login/JWT flow, token storage and the `{code, message, correlationId}` error shape | Khoa |
-| P1 | Employee page: log in, call `GET /api/v1/qr/generate`, render **only the server's payload**, refresh at the 30 s boundary; never generate a TOTP in the browser | Khoa |
-| P1 | Kiosk simulator: call `POST /api/local/scan`, show *authorization result* separately from *gate-command status*, offline toggle (use `PUT /api/dev/kiosk/sync/offline` until an official mechanism exists) | Khánh |
+| P0 | Get the `/demo` routes of [API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed) agreed (QR/rotate/revoke, central list, whitelist sync, scan `reason`), then record them with `record-decision` | Khoa, Khôi, Khánh |
+| P1 | Employee page: log in, call `GET /api/v1/qr/generate`, render **only the server's payload**, refresh at the 30 s boundary; never generate a TOTP in the browser. The QR image, countdown and revoked/expired states already exist in `/demo` column 1 and can be reused | Khoa |
+| P1 | Kiosk simulator: `/demo` column 2 already calls `POST /api/local/scan`, shows *authorization result* separately from *gate-command status* and has the offline toggle (`PUT /api/dev/kiosk/sync/offline`). Remaining: check it against Khánh's real scan once it stops answering 501 | Khánh |
 | P1 | Guard (manual open + reason), HR (revoke, export), Admin pages; a dashboard with real data | Khôi, Nam, Khoa |
 | P2 | Keep `src/catalog.ts` in sync with STATUS; FR/NFR → code → test traceability with screenshots | — |
 
