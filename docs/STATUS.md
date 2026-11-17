@@ -36,7 +36,7 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 | `gate-station-service` | Khôi | **SCAFFOLD** | `/services/gate-station/health` | boots + real health; `POST /api/v1/gates`, `GET …/status`, `POST …/manual-open` answer **501** | registration, heartbeat, manual open + audit |
 | `attendance-processor` | Khôi | **DEV_SLICE** | `/services/attendance/health` | real idempotent ingestion and dev-only history GET via `/api/dev/attendance/*`; history excludes fixtures. H1 dev-only `GET /api/v1/attendance/events` supplies `/demo` with fixtures, newest first. Latest H1/H2 verification: §20; earlier PostgreSQL evidence: §§13/19. Production ingestion POST routes answer **501**; no production History GET route | authenticated production routes, authorized history access, end-to-end rejected scans (D06), reference-validation policy |
 | `reporting-service` | Nam | **DEV_SLICE** | `/services/reporting/health` | (2026-11-15, §3 rows 16–18) factory report and dashboard in Asia/Ho_Chi_Minh days, ALLOWED-only, fixtures excluded unless opted in; monthly HR export with a period-derived `batch_uuid`, frozen items, 01:00 schedule with catch-up, backoff until created + 5 h, FAILED + log alert, compare-and-set claims; two payroll channels (`rest`, `file`) under one contract test. Only via `/api/dev/reports/*`; `/api/v1/reports/*` answer **501** | authentication/roles, shift dimension, mail alert, re-export of late events, NFR-7 measurement |
-| `kiosk-agent` | Khánh | **DEV_SLICE** | `/services/kiosk/health`; host `8085` | SQLite WAL + `synchronous=FULL`; PENDING committed before the turnstile call; sync by per-id ack with backoff; FAILED only on a per-event rejection; the offline switch cuts only kiosk → central; health reads the real SQLite file. Whitelist domain, atomic SQLite snapshots and local AES-256-GCM secret protection implemented (D08 update below); HTTP source/use case/scheduler behind `KIOSK_WHITELIST_SYNC_ENABLED` (default false), mock Central tests in §§14–16; B27 supplies the real Central revision header (§18). `POST /api/local/scan` answers **501** | QR scan, TOTP verification, anti-replay (`used_tokens` table unused), rejected scans (handoff: [kiosk README](../kiosk-agent/README.md#handoff-qr-scan-for-khánh-2026-11-16)); startup fetch; dev AES key provisioning; key lifecycle, heartbeat, manual open, production auth to central |
+| `kiosk-agent` | Khánh | **DEV_SLICE** | `/services/kiosk/health`; host `8085` | SQLite WAL/FULL queue, per-ID ACK/backoff, offline switch, Whitelist snapshots/AES-GCM/HTTP source/use case/scheduler and H2 manual trigger. H3 queues an initial pass after Ready only in dev + enabled; H4 provisions/reuses an external local AES key. Standalone/example flag defaults false; dev-only Compose explicitly enables it and requires a key. Latest verification: §21; historical Central header evidence: §18. `POST /api/local/scan` remains **501** | QR scan, TOTP verification, anti-replay (`used_tokens` integration), rejected scans ([handoff](../kiosk-agent/README.md#handoff-qr-scan-for-khánh-2026-11-16)); H3/H4 deployed gateway acceptance; production key lifecycle, heartbeat, manual open, auth |
 | `mock-turnstile-api` | Khánh | **MOCK** | `/health`; host `8090` | `POST /gates/{id}/open`, command counting, failure injection; always `physicalOpenConfirmed:false` | contract is invented by the bootstrap (B18) |
 | `mock-hr-payroll-api` | Nam | **MOCK** | `/health`; host `8091` | idempotent upsert by `attendanceId`, `duplicateBatch`, 4xx/5xx injection, state survives a container restart, `GET /mock/hr/employees` | HR contract is DRAFT (D09/D10) |
 | `web-frontend` | Khiêm | **DEV_SLICE** | `/` (gateway 8080 or host 3000); `/demo` | *Status* page (real health every 10 s), *Dev slice* page, five placeholders labelled **Not implemented**. `/demo` has employee QR image, kiosk controls/queue and central inspection. User/QR's dev response matches QR expectations (§18). H1/H2 now supply the existing frontend's Central list/manual whitelist paths ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-draft)); backend contract tests in §20, no frontend source change. 118 Vitest tests re-run in §18; historical Chrome layout checks in §3 | login, real scan (`/api/local/scan` is 501), Guard/HR/Admin pages; H1/H2 deployed gateway/browser acceptance not rerun |
@@ -481,3 +481,68 @@ Files in this handoff:
   `DevWhitelistSyncAvailabilityTest`, `WhitelistSyncProfileWebTest`; existing `WhitelistHttpSyncWiringTest` is extended.
 - Markdown: both module READMEs, `web-frontend/README.md` (reference/status only), `API-CONTRACTS`, `DECISIONS`,
   `STATUS`, `TRACEABILITY`, `SOLID-GUIDELINES`, `TODO` under `docs/`.
+
+## 21. H3/H4 dev whitelist startup and key provisioning (2026-11-17)
+
+Starting tree: clean `feat/kiosk-whitelist-sync` at `ee88e68` (H1/H2 committed by the user).
+No fetch/merge/branch/index/commit/push operation in this task. The module stays DEV_SLICE.
+
+H3: dev + enabled registers a Ready listener. The existing scheduler waits until ApplicationReady, then queues
+one initial pass on its private worker; other profiles retain delayed SmartLifecycle startup. No HTTP in bean
+constructors, refresh or the event thread. The same use case/guard covers initial, periodic and manual calls.
+Failure/offline leaves old cache intact and periodic retry available. The default interval is still 60000 ms.
+
+H4: `scripts/provision-kiosk-key.ps1` uses .NET CSPRNG for a missing 32-byte Base64 key in ignored local `.env`.
+Valid keys/files are reused unchanged; invalid/duplicate keys fail safely. The script serializes invocations and
+replaces the file atomically without printing values or retaining backups. A local key was provisioned here and
+then reused successfully; `git check-ignore .env` exit 0. No real key was added to tracked files.
+The dev-only Compose sets sync true and requires a nonempty key. `application.yml`/`.env.example` remain false;
+the existing codec, envelope, AAD and queue-only standalone missing-key behavior are unchanged.
+
+Environment: Windows PowerShell 5.1, JDK 23.0.1 compiling release 21; no JDK 21 installed here.
+Docker CLI initially showed Client/Server 28.0.1 and existing containers (both commands exit 0).
+Testcontainers 1.21.4 later received HTTP 500 from its default `docker_engine` pipe. CLI's context points to
+`dockerDesktopLinuxEngine`; a process-only DOCKER_HOST retry also got 500, and CLI then reproduced 500 on both
+pipes. No Docker settings, user Testcontainers config, containers, volumes or database data were changed.
+Existing containers were not removed; no stack was started/reset. Compose configuration checks do not require
+a working daemon and do not establish gateway acceptance.
+
+| Command | Exit | PASS | FAIL | ERROR | SKIP |
+|---|---|---|---|---|---|
+| `mvn -B -ntp -pl kiosk-agent -Dtest=WhitelistSyncSchedulerTest,WhitelistSchedulerConfigTest,WhitelistHttpSyncWiringTest,WhitelistSecretConfigTest test` | 0 | 68 | 0 | 0 | 0 |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-provision-kiosk-key.ps1` (final run) | 0 | 9 | 0 | 0 | 0 |
+| `mvn -B -ntp -fae -pl backend-services/attendance-processor,kiosk-agent test` — Attendance | 0 | 108 | 0 | 0 | 18 |
+| Same full run — Kiosk | 0 | 389 | 0 | 0 | 0 |
+| `mvn -B -ntp -pl backend-services/attendance-processor test` with process-only `DOCKER_HOST=npipe:////./pipe/dockerDesktopLinuxEngine` | 0 | 108 | 0 | 0 | 18 |
+| `mvn -B -ntp -Dtest=*ArchitectureTest test` — all five modules | 0 | 15 | 0 | 0 | 0 |
+
+The 18 PostgreSQL cases (12 History including H1 + 6 Idempotency) remain **SKIP, not PASS** in both attempts.
+Do not add focused runs or the repeated architecture cases to full module totals. No Attendance Java/tests changed.
+Initial script execution was blocked by local Execution Policy; the per-process Bypass option was then used
+without changing system policy. The first executable script test run had 7 PASS / 2 FAIL: PowerShell 5.1 coerced
+a null backup path into an empty string in File.Replace. Using its explicit NullString fixed atomic replacement;
+the complete script suite then passed 9/9. Keys were not printed in either run.
+
+Verified locally: profile/flag/Ready gating, duplicate Ready suppression, initial 503 or missing header → old
+cache retained → later periodic HTTP-mock response committed through real SQLite/AES, manual/periodic exclusion
+during initial fetch, offline no fetch/write, key length/restart behavior. Existing Attendance Sync, queue,
+scheduler lifecycle and persistence regressions passed. No new public endpoint or authentication is added.
+
+`docker compose config --quiet` with local `.env`: exit 0. Missing-key negative check
+`docker compose --env-file .env.example config --quiet`: expected exit 1 with a provisioning hint.
+Only quiet/sanitized configuration checks are used; no rendered credentials enter the log.
+
+Remaining for Nam: stable Docker/Testcontainers and JDK 21 rerun; rebuild dev stack with the preserved local
+key, observe initial failure/retry while gateway starts, then manual sync/newer-or-unchanged revision and
+restart/reopen through the real gateway `/demo`. Health does not imply that whitelist is populated.
+Scan/TOTP/Anti-Replay/Turnstile remain unchanged (scan 501); no new whole-stack acceptance or NFR claim.
+Setup and key custody limits: [Kiosk H3/H4](../kiosk-agent/README.md#dev-initial-sync-and-key-provisioning-h3h4).
+
+Files: two existing Java files (`WhitelistSyncScheduler`, `WhitelistSyncWiringConfig`); three existing tests
+(`WhitelistSchedulerConfigTest`, `WhitelistHttpSyncWiringTest`, `WhitelistSecretConfigTest`); two new PowerShell
+scripts; `.env.example`, `docker-compose.yml`, `application.yml` (comment only); root/Kiosk READMEs and
+`STATUS`, `TRACEABILITY`, `TODO`, `DECISIONS`, `SOLID-GUIDELINES`. No module labels change.
+
+Final checks: `node scripts/check-docs.mjs` exit 0 (30 Markdown files, 355 links, zero warnings),
+`git diff --check` exit 0. Branch/HEAD remain `feat/kiosk-whitelist-sync` / `ee88e68`;
+`git diff --cached --quiet` exit 0 confirms no index changes. H3/H4 remain uncommitted.

@@ -49,12 +49,12 @@ Names the team proposed in its design trees (companion text files in the `NAM` D
 |---|---|
 | `KioskAgentApplication` | done |
 | `presentation/controller/KioskScanController` | exists; answers **501** (transport only when implemented) |
-| `presentation/controller/DevWhitelistSyncController` | H2 dev-only POST delegates to the existing singleton, no direct HTTP/SQLite/AES logic. Non-2xx for disabled/unavailable/offline/busy/failed sync; HTTP-mock → real SQLite and shared-guard test in STATUS §20. Default flag still false; no startup fetch |
+| `presentation/controller/DevWhitelistSyncController` | H2 dev-only POST delegates to the existing singleton, no direct HTTP/SQLite/AES logic. Non-2xx for disabled/unavailable/offline/busy/failed sync; HTTP-mock → real SQLite and shared-guard test in STATUS §20. H3/H4 add a separate dev Ready trigger and local key setup (§21); this controller stays unchanged |
 | `presentation/dto/QrScanRequestDto` | done (TOTP redacted in `toString`) |
 | `presentation/dto/ScanResultResponseDto` | **not created** |
 | `application/usecase/ProcessQrScanUseCase` | **not created** — verify offline, persist the durable event **and** the used token atomically, then command the gate via `ITurnstileAdapter`. `QueueSyntheticEventUseCase` shows the commit-then-open ordering |
 | `application/usecase/SyncManagerScheduler` | done (trigger for `SyncPendingEventsUseCase`) |
-| `application/usecase/WhitelistSyncScheduler` | implemented opt-in SmartLifecycle fixed-delay trigger, first delay equals interval; private executor independent of Attendance scheduling, safe status/error logs, no direct transport/store access or new sync lock. [Latest scheduler evidence](STATUS.md#16-whitelist-scheduler-2026-11-14) |
+| `application/usecase/WhitelistSyncScheduler`; dev-only `config/WhitelistSyncWiringConfig.initialWhitelistSync` | implemented opt-in fixed-delay worker. Dev + flag true waits for ApplicationReady and queues one initial pass asynchronously; other profiles keep the full first delay. Same private executor/shared use-case guard, safe logs and lifecycle cleanup; no HTTP/store dependency or new sync lock. [H3/H4 evidence](STATUS.md#21-h3h4-dev-whitelist-startup-and-key-provisioning-2026-11-17); earlier timing evidence retained in §16 |
 | `domain/model/LocalAttendanceEvent` | done |
 | `domain/model/WhitelistEmployee`, `WhitelistSnapshot`, `WhitelistMetadata`, `WhitelistLookup`, `QrStatus` | implemented; immutable local whitelist models, redacted/defensively copied material, initialized vs empty snapshot; `WhitelistModelsTest` |
 | `domain/port/IWhitelistReader`, `IWhitelistSnapshotStore`; `domain/exception/WhitelistCacheException` | implemented; separate local read/update contracts, safe cache failure reasons |

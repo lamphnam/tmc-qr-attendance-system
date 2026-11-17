@@ -18,27 +18,44 @@ public final class WhitelistSyncScheduler implements SmartLifecycle {
     private final SyncWhitelistUseCase useCase;
     private final long intervalMs;
     private final Supplier<ScheduledExecutorService> executorFactory;
+    private final boolean waitUntilReady;
     private ScheduledExecutorService executor;
     private ScheduledFuture<?> task;
     private volatile boolean running;
+    private boolean initialSyncRequested;
 
     public WhitelistSyncScheduler(SyncWhitelistUseCase useCase, long intervalMs) {
+        this(useCase, intervalMs, false);
+    }
+
+    public WhitelistSyncScheduler(SyncWhitelistUseCase useCase, long intervalMs, boolean waitUntilReady) {
         this(useCase, intervalMs, () -> Executors.newSingleThreadScheduledExecutor(action -> {
             Thread thread = new Thread(action, "tmc-whitelist-sync");
             thread.setDaemon(true);
             return thread;
-        }));
+        }), waitUntilReady);
     }
 
     // Control time/executor lifecycle in tests without adding a new scheduling abstraction.
     WhitelistSyncScheduler(SyncWhitelistUseCase useCase, long intervalMs,
             Supplier<ScheduledExecutorService> executorFactory) {
+        this(useCase, intervalMs, executorFactory, false);
+    }
+
+    private WhitelistSyncScheduler(SyncWhitelistUseCase useCase, long intervalMs,
+            Supplier<ScheduledExecutorService> executorFactory, boolean waitUntilReady) {
         this.useCase = Objects.requireNonNull(useCase, "useCase");
         if (intervalMs < 1_000 || intervalMs > 86_400_000) {
             throw new IllegalArgumentException("kiosk.whitelist.sync-interval-ms must be between 1000 and 86400000");
         }
         this.intervalMs = intervalMs;
         this.executorFactory = Objects.requireNonNull(executorFactory, "executorFactory");
+        this.waitUntilReady = waitUntilReady;
+    }
+
+    @Override
+    public boolean isAutoStartup() {
+        return !waitUntilReady;
     }
 
     /** The lifecycle monitor protects registration/shutdown only, never HTTP, storage or the use-case guard. */
@@ -56,6 +73,15 @@ public final class WhitelistSyncScheduler implements SmartLifecycle {
             executor.shutdown();
             throw failure;
         }
+    }
+
+    /** Queue one ready-time pass on the same worker; network work never runs on the Spring event thread. */
+    public synchronized void requestInitialSync() {
+        if (!running || initialSyncRequested) {
+            return;
+        }
+        executor.execute(this::tick);
+        initialSyncRequested = true;
     }
 
     @Override

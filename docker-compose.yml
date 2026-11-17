@@ -8,7 +8,8 @@
 #   docker compose down                      # stop, KEEP data      (volumes survive)
 #   docker compose down -v                   # stop, DESTROY data   (central DB, kiosk SQLite, mock HR state)
 #
-# Values come from .env (optional - copy .env.example) and fall back to the same dummy defaults.
+# Provision the required local AES key first: powershell -NoProfile -File scripts/provision-kiosk-key.ps1
+# Other values come from .env and fall back to dummy dev defaults. Never print `docker compose config` with secrets.
 
 name: tmc-qr-attendance
 
@@ -110,9 +111,10 @@ services:
       SQLITE_PATH: /data/kiosk.db
       KIOSK_ID: ${KIOSK_ID:-BD-K01}
       KIOSK_FACTORY_ID: ${KIOSK_FACTORY_ID:-BD}
-      KIOSK_WHITELIST_SYNC_ENABLED: ${KIOSK_WHITELIST_SYNC_ENABLED:-false}
+      # Explicit opt-in for THIS dev-only stack. Standalone application/example defaults remain false.
+      KIOSK_WHITELIST_SYNC_ENABLED: "true"
       KIOSK_WHITELIST_SYNC_INTERVAL_MS: ${KIOSK_WHITELIST_SYNC_INTERVAL_MS:-60000}
-      KIOSK_WHITELIST_KEY_BASE64: ${KIOSK_WHITELIST_KEY_BASE64:-}
+      KIOSK_WHITELIST_KEY_BASE64: ${KIOSK_WHITELIST_KEY_BASE64:?Provision the local dev AES key with scripts/provision-kiosk-key.ps1}
       KIOSK_API_KEY: ${KIOSK_API_KEY:-dev-only-kiosk-change-me}
       # Kiosk -> central goes through the gateway, like any other client (docs/API-CONTRACTS.md).
       CENTRAL_BASE_URL: http://nginx-gateway

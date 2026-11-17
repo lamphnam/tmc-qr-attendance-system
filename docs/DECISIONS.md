@@ -164,3 +164,25 @@ existing scheduled job. Only the shared use case is called; no new sync lock, HT
 Shutdown cancels future ticks without interrupting a commit and waits at most 10 seconds; runtime failures use fixed
 safe logs and leave later ticks alive. Existing offline, source-version and atomic replacement rules are unchanged.
 Real Central revision/auth and cross-service verification remain open. [Behavior and limits](../kiosk-agent/README.md#whitelist-scheduling).
+
+## Dev whitelist initial sync and key provisioning (2026-11-17)
+
+At the assigned user's explicit H3/H4 request, dev + whitelist enabled now defers the worker's lifecycle start
+until ApplicationReady, then queues one initial pass on its existing private executor. No HTTP runs in bean
+constructors or the event thread. Other profiles retain the original first delay; the existing use case owns
+offline/concurrency/revision/commit behavior. Expected and unexpected pass failures leave periodic retry alive.
+This supersedes the dev timing of the historical scheduler entry above, without adding a port, sync lock or endpoint.
+
+The existing Compose file is explicitly a localhost dev stack, so it sets whitelist enabled to true and requires
+a nonempty `KIOSK_WHITELIST_KEY_BASE64`. The standalone application and sample environment still default false.
+`scripts/provision-kiosk-key.ps1` creates a missing local `.env` from the sample, provisions only a missing/blank
+key with 32 CSPRNG bytes, and leaves a valid existing key/file unchanged. Invalid/duplicate keys fail safely;
+exclusive invocation lock + atomic file replacement avoid silent concurrent rotation/partial env writes.
+The script does not print keys or write templates; `.env` stays ignored. Preserve it outside the SQLite volume
+for recovery. Script-level validation is explicit; the existing codec and its error semantics are unchanged.
+
+No production key lifecycle, vault, rotation, transport authorization or completion of D08/NFR-4 is claimed.
+Compose cannot guarantee that Central/gateway is ready when the Kiosk's Ready event fires; initial failure is
+normal and later fixed-delay/manual retry is required. No dependency on Central is added to Kiosk startup.
+H1/H2 contracts, Scan/TOTP/Anti-Replay/Turnstile, schema, AES envelope/AAD and revision rules are unchanged.
+Evidence and outstanding gateway acceptance: [STATUS §21](STATUS.md#21-h3h4-dev-whitelist-startup-and-key-provisioning-2026-11-17).
