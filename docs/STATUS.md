@@ -41,7 +41,7 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 | `mock-hr-payroll-api` | Nam | **MOCK** | `/health`; host `8091` | idempotent upsert by `attendanceId`, `duplicateBatch`, 4xx/5xx injection, state survives a container restart, `GET /mock/hr/employees` | HR contract is DRAFT (D09/D10) |
 | `web-frontend` | Khiêm | **DEV_SLICE** | `/` (gateway 8080 or host 3000); `/demo` | *Status* page (real health every 10 s), *Dev slice* page, five placeholders labelled **Not implemented**. `/demo` has employee QR image, kiosk controls/queue and central inspection. User/QR's dev response now matches the QR payload/period/revoked-code expectations (§18); offline/sync/queue and per-id central lookup use real dev endpoints. Central list and explicit whitelist-sync routes remain proposals ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed)). 118 Vitest tests re-run in §18; historical Chrome layout checks (1440/1366/1280/390 px) in §3 | login, real scan (`/api/local/scan` is 501), Guard/HR/Admin pages, dashboard with business data; no new browser visual QA in §18 |
 | `tests/integration` | Nam | **READY** (dev slice) | see README §4 | §18: `slice.test.mjs` 8, `user-qr.test.mjs` 2, `reporting.test.mjs` 3; all pass sequentially on the K1–K4 tree, no skips | end-to-end real scan/auth tests (owners add) |
-| `tests/load` | Nam | **NOT_IMPLEMENTED** | — | README + `health-baseline.js` (**NOT_TESTED**, k6 not installed) | NFR-1 / NFR-7 |
+| `tests/load` | Nam | **NOT_IMPLEMENTED** | — | (2026-11-17) T01 script `k6/peak-scan-load.js` and fixture `fixtures/load-employees.sql` written, **NOT_RUN** (scan answers 501); only `SCENARIO=selftest` was run (k6 v1.7.1, exit 0: TOTP matches the Java vectors). `health-baseline.js` NOT_TESTED | NFR-1 / NFR-7 |
 | `scripts/smoke.sh`, `smoke.ps1` | Nam | **READY** | — | §18: 35 checks per script, exit 0; non-zero exit on any failure | — |
 | `Makefile` | Nam | **READY** (partly) | — | run through `make`: `help`, `config`, `smoke`, `check-java` (refuses JDK 17, accepts 21). `test`, `up`, `integration`, `reset` not run through `make` (the commands behind them were run directly) | — |
 
@@ -402,3 +402,20 @@ lock của WAL; helper cuối dùng kết nối DB chỉ đọc trên volume cho
 Contract vẫn DRAFT và cần reviewer Khoa–Khánh–Khiêm cùng owner schema/integration (B27). Schema chỉ áp dụng trên
 volume rỗng; reset Central làm revision trở lại 1, cần phối hợp cache Kiosk ([Known limitations](DECISIONS.md#known-limitations)).
 Các label module giữ nguyên; không tuyên bố production auth, HR sync, scan/TOTP Kiosk hay NFR hiệu năng đã hoàn tất.
+
+## 19. Full run on `develop` with Docker (2026-11-17)
+
+Tree: `develop` at `94e450f` plus the uncommitted B28 docs, the T01 load files and a `verify.mjs` fix. Windows 11, Docker Engine 29.4.0, Compose 5.1.1, JDK 21.0.11, Node 24.13.1, k6 1.7.1. Before the run, with the owner's approval, `docker compose down -v` removed the stale volumes (created before the B27 schema).
+
+| Command | Exit | Result |
+|---|---|---|
+| `node scripts/verify.mjs` (full) | 0 | java 614 tests, 0 failed, 0 errors, **0 skipped**; frontend 118 (typecheck, test, build); mocks 6 + 11; docs OK; compose config; stack up, all healthy; smoke 35/35; integration 13/13 |
+| `psql ... < tests/load/fixtures/load-employees.sql` | 0 | 1000 employees inserted in 1.5 s, BD revision 5 → 1005; rerun inserts 0 (idempotent) |
+| `node --test tests/integration/user-qr.test.mjs` after the fixture | 0 | 2/2; its independent checksum check covers the newest 200 audit rows |
+| Node recomputation of the whole audit chain (scratch script, `TMC-AUDIT-V1`) | 0 | 1009 rows from genesis, 1000 of them fixture rows, 0 breaks, 0 checksum mismatches |
+| `SCENARIO=selftest k6 run tests/load/k6/peak-scan-load.js` | 0 | TOTP equals 12 vectors from the Java `TotpCodeGenerator` |
+| `SCENARIO=quick k6 run tests/load/k6/peak-scan-load.js` | 108 | Expected abort: fixture found and TOTP equal to live user-qr, then `POST /api/local/scan` answered 501. **T01 stays NOT_RUN** |
+
+`verify.mjs` printed "? tests passed" for the frontend because Vitest colours its summary; the count is now read after stripping ANSI escapes (re-run `--only frontend`: 118).
+
+Still not exercised: the kiosk scan (501), whitelist sync in the default Compose (flag off, no dev AES key), NFR-1 and NFR-7.

@@ -15,15 +15,15 @@ Cross-cutting references (do not restate them in a PR): who depends on whom and 
 
 | P | Task | Depends on / blocks |
 |---|---|---|
-| P0 | **Auth/token contract**: JWT claims, role names matching the seeded `roles`, lifetime, how other services verify it — agree with Khiêm, Khôi, Nam | blocks every role-protected route |
+| P0 | **Out of M2 scope ([B28](DECISIONS.md#bootstrap-decisions)).** **Auth/token contract**: JWT claims, role names matching the seeded `roles`, lifetime, how other services verify it — agree with Khiêm, Khôi, Nam | blocks every role-protected route |
 | P0 | Factory-scoped revision/key-protected dev snapshot exists (B27); add production kiosk identity/factory authorization, approve the schema and production reset/epoch policy with Khánh | Khánh needs authorized cache updates |
 | P0 | Review K1–K4 contract alignment with Khoa–Khánh–Khiêm and shared-schema owners; implementation/verification in [STATUS §18](STATUS.md#18-userqr-k1k4-contract-alignment-2026-11-16). `X-Whitelist-Version`, required scope, QR payload/period and revoked 409 are implemented; public HR membership API remains absent | Khoa, Khánh, Khiêm, Khôi, Nam |
-| P1 | Align the dev `KIOSK_API_KEY` default between `user-qr-service` and `kiosk-agent` in Compose (kiosk defaults to empty today) | Khôi |
-| P0 | TOTP/lifecycle employee-ID dev routes exist; wire JWT identity to `GET /api/v1/qr/generate`, approve the token contract and add employee/HR authorization | Khiêm renders it |
+| ~~P1~~ | ~~Align the dev `KIOSK_API_KEY` default between `user-qr-service` and `kiosk-agent` in Compose~~ — done in `94e450f` (both default to `dev-only-kiosk-change-me`) | Khôi |
+| P0 | **Out of M2 scope ([B28](DECISIONS.md#bootstrap-decisions)).** TOTP/lifecycle employee-ID dev routes exist; wire JWT identity to `GET /api/v1/qr/generate`, approve the token contract and add employee/HR authorization | Khiêm renders it |
 | P1 | Secret protection at rest/key management (D08): current `shared_secret` holds public synthetic dev fixtures; rotation already exists | Khánh |
 | P1 | HR employee sync (FR-1.1) from `GET /mock/hr/employees` (`tmc.hr-api.base-url` configured); connect revocation to HR/authenticated UI | Nam (mock), Khiêm (HR UI) |
 | P1 | Audit chain/rollback/concurrency tests exist for QR lifecycle. Add INSERT-only DB role, external checkpoint, retention/integrity operations and authorized viewer; integrate manual gate audit (NFR-8, T04) | Khôi; shared dummy owner is still B14 |
-| P1 | MFA for Admin/HR (NFR-4). If it will not be built, the report must say so | — |
+| P1 | **Out of M2 scope ([B28](DECISIONS.md#bootstrap-decisions)).** MFA for Admin/HR (NFR-4). If it will not be built, the report must say so | — |
 | P2 | Remove the two `/api/dev/*` gateway locations and the `dev` profile from any non-developer environment; add rate limiting and a CORS allowlist | — |
 
 ## 2. Khánh — `kiosk-agent`, `mock-turnstile-api`, SQLite, SyncManager
@@ -35,7 +35,7 @@ Cross-cutting references (do not restate them in a PR): who depends on whom and 
 | P0 | ~~Whitelist pull, cache and refresh~~ — built by Khôi behind `KIOSK_WHITELIST_SYNC_ENABLED`; the scan only reads it through `IWhitelistReader`. State plainly in the report that revocation is not instant while offline | Khoa (revision header) |
 | P1 | Decide D06 (rejected scans: separate table vs `scan_result=REJECTED`) and which ones sync, with Khôi | Khôi |
 | P1 | Switch `CENTRAL_SYNC_PATH` to the authenticated route when Khôi opens it; add kiosk → central credentials (D04) | Khôi, Khoa |
-| P1 | Heartbeat to gate-station; receive manual-open commands over the agreed channel (D11) | Khôi |
+| P1 | **Out of M2 scope ([B28](DECISIONS.md#bootstrap-decisions)).** Heartbeat to gate-station; receive manual-open commands over the agreed channel (D11) | Khôi |
 | P1 | Official T02: **20 unique events** (different employees/time steps), restart while offline, lost ack after a central commit; compare counts and ID sets on both sides (the slice only proves 1 event) | Nam (harness) |
 | P2 | `ZKTecoTurnstileAdapter` returning `UNSUPPORTED` (never fake a protocol; first define `UNSUPPORTED` in the port contract, see [SOLID-GUIDELINES](SOLID-GUIDELINES.md#liskov-substitution-lsp--high-priority)); replace or adopt the mock turnstile contract (B18) | — |
 
@@ -48,19 +48,20 @@ Cross-cutting references (do not restate them in a PR): who depends on whom and 
 | P1 | Kiosk whitelist sync for the demo: fetch once at startup (today the first fetch waits a full interval), enable `KIOSK_WHITELIST_SYNC_ENABLED` in dev Compose, decide how a dev AES key (`KIOSK_WHITELIST_KEY_BASE64`) is provisioned; re-run your tests on JDK 21 with Docker | Khoa (revision header) |
 | P0 | Own the final ERD in `init-db/schema.sql`: confirm B01 or switch to Flyway **in one place** (D02) | everyone |
 | P1 | Reference-validation policy (does the employee/gate exist?), rejection and retention rules; accepted/rejected semantics and timezone for Nam | Nam |
-| P1 | `gate-station-service`: gate/kiosk registration, heartbeat, `GET /api/v1/gates/{id}/status` (501 today) | Khánh |
-| P1 | `POST /api/v1/gates/{id}/manual-open`: Guard role, mandatory `reason`, audit record. M1 does not define the delivery channel to the kiosk (D11): define states and authorization first, do not fake end-to-end | Khoa, Khánh, Khiêm |
+| P1 | **Out of M2 scope ([B28](DECISIONS.md#bootstrap-decisions)).** `gate-station-service`: gate/kiosk registration, heartbeat, `GET /api/v1/gates/{id}/status` (501 today) | Khánh |
+| P1 | **Out of M2 scope ([B28](DECISIONS.md#bootstrap-decisions)).** `POST /api/v1/gates/{id}/manual-open`: Guard role, mandatory `reason`, audit record. M1 does not define the delivery channel to the kiosk (D11): define states and authorization first, do not fake end-to-end | Khoa, Khánh, Khiêm |
 | P2 | Module View, DSM, ERD and C&C sequences for the report, drawn from the real classes | — |
 
 ## 4. Khiêm — `web-frontend`
 
 | P | Task | Depends on |
 |---|---|---|
-| P0 | Agree with Khoa the login/JWT flow, token storage and the `{code, message, correlationId}` error shape | Khoa |
+| P0 | `/demo` column 1: add `activate` to `src/api/endpoints.ts` and an "Activate" button next to Revoke (`POST /api/v1/qr/{id}/activate` already exists); without it a revoked QR cannot be restored from the UI | — |
+| P0 | **Out of M2 scope ([B28](DECISIONS.md#bootstrap-decisions)).** Agree with Khoa the login/JWT flow, token storage and the `{code, message, correlationId}` error shape | Khoa |
 | P0 | Get the `/demo` routes of [API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed) agreed (QR/rotate/revoke, central list, whitelist sync, scan `reason`), then record them with `record-decision` | Khoa, Khôi, Khánh |
-| P1 | Employee page: log in, call `GET /api/v1/qr/generate`, render **only the server's payload**, refresh at the 30 s boundary; never generate a TOTP in the browser. The QR image, countdown and revoked/expired states already exist in `/demo` column 1 and can be reused | Khoa |
+| P1 | **Out of M2 scope ([B28](DECISIONS.md#bootstrap-decisions)).** Employee page: log in, call `GET /api/v1/qr/generate`, render **only the server's payload**, refresh at the 30 s boundary; never generate a TOTP in the browser. The QR image, countdown and revoked/expired states already exist in `/demo` column 1 and can be reused | Khoa |
 | P1 | Kiosk simulator: `/demo` column 2 already calls `POST /api/local/scan`, shows *authorization result* separately from *gate-command status* and has the offline toggle (`PUT /api/dev/kiosk/sync/offline`). Remaining: check it against Khánh's real scan once it stops answering 501 | Khánh |
-| P1 | Guard (manual open + reason), HR (revoke, export), Admin pages; a dashboard with real data | Khôi, Nam, Khoa |
+| P1 | **Out of M2 scope ([B28](DECISIONS.md#bootstrap-decisions)).** Guard (manual open + reason), HR (revoke, export), Admin pages; a dashboard with real data | Khôi, Nam, Khoa |
 | P2 | Keep `src/catalog.ts` in sync with STATUS; FR/NFR → code → test traceability with screenshots | — |
 
 ## 5. Nam — `reporting-service`, `mock-hr-payroll-api`, testing, report assembly
@@ -72,5 +73,5 @@ Cross-cutting references (do not restate them in a PR): who depends on whom and 
 | P1 | Confirm with Khôi the semantics B24 chose (ALLOWED-only export, `dev_fixture` excluded, Asia/Ho_Chi_Minh days and months) so D10 can move to RESOLVED | Khôi |
 | P1 | Open `GET /api/v1/reports/attendance` and `/dashboard` with authentication and roles once JWT exists (the logic already works on `/api/dev/reports/*`); measure NFR-7 ≤ 30 s on a representative dataset (T06) | Khoa (roles) |
 | P1 | HR export: open `POST /api/v1/reports/hr-export/trigger` for HR/Admin once JWT/RBAC exists (logic done on the dev route, B24–B26); decide whether late events need a supplementary batch; a real alert channel (mail) if the report needs one | Khoa (roles) |
-| P1 | NFR-1 load test (T01): pick **one** tool (k6 / JMeter / Locust), use distinct employees/time steps, time the fast path separately from background sync, report p50/p95/p99 or `NOT_RUN` | Khánh (real scan path) |
+| P1 | NFR-1 load test (T01): k6 script and 1000-employee fixture written ([tests/load](../tests/load/README.md)); run `quick`, `steady` and `burst` once the scan is merged, then record p95/p99 in STATUS | Khánh (real scan path) |
 | P2 | Extend `tests/integration/` per finished feature; assemble Testing & Evaluation, Allocation View and the final report format | — |

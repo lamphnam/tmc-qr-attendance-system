@@ -19,7 +19,7 @@ What must be proven and what counts as done. Commands to run things: root [READM
 | Mocks | `node:test` | `mock-external-systems/*` |
 | Running stack | `scripts/smoke.sh` / `smoke.ps1` (health, DB/SQLite connectivity, routing, honest 501s) | `scripts/` |
 | Black-box slice / QR lifecycle | `slice.test.mjs` asserts on PostgreSQL rows, SQLite queue and turnstile commands; `user-qr.test.mjs` checks QR fields/payload/period, 409 revocation, scoped revision headers (including `[]`), validation and independent checksum verification | `tests/integration/` |
-| Load | placeholder only | `tests/load/` |
+| Load | k6 T01 script + 1000-employee fixture, NOT_RUN until the scan exists ([tests/load](../tests/load/README.md)) | `tests/load/` |
 | All of the above + docs check, one honest report | `scripts/verify.mjs` (`--fast` without Docker); markdown links/anchors: `scripts/check-docs.mjs` | `scripts/` |
 
 ## Must-run by M2 [TEAM-PLAN]

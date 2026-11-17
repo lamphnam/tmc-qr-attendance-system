@@ -108,7 +108,9 @@ stage('frontend', {
       log += `$ ${cmd} ${a.join(' ')}\n${r.output}\n`;
       if (r.status !== 0) return record(name, 'FAIL', `npm ${a.join(' ')} exited ${r.status}`, seconds, log);
     }
-    record(name, 'PASS', `typecheck + test + build; ${/Tests\s+(\d+) passed/.exec(log)?.[1] ?? '?'} tests passed`, seconds, log);
+    // Vitest colours its summary; strip ANSI escapes before reading the count.
+    const plain = log.replace(/\x1b\[[0-9;]*m/g, '');
+    record(name, 'PASS', `typecheck + test + build; ${/Tests\s+(\d+) passed/.exec(plain)?.[1] ?? '?'} tests passed`, seconds, log);
   },
 });
 
