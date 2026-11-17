@@ -251,18 +251,19 @@ What reporting sends to HR (channel `rest`): `POST /mock/hr/attendance-batches` 
 - Mock HR `POST /mock/hr/attendance-batches` [DRAFT] with batch UUID and attendanceIds; implement receiver-side upsert and failure flag `SIMULATE_HR_DOWN` (team notes disagree HTTP 500 vs 503: both transient; test both).
 - Scheduled job @ day 1 01:00 / retry until 06:00 / alert / 12:00 reconciliation deadline from M1. Manual trigger cannot accidentally duplicate real scheduled batch.
 
-## 8. Demo main-flow routes [PROPOSAL Khiêm → Khoa / Khôi / Khánh, not agreed]
+## 8. Demo main-flow routes [DRAFT]
 
 Called by `web-frontend` `/demo` (`src/api/endpoints.ts`). QR routes now match §1 in the dev profile (B27);
-the remaining proposals below still need implementation/owner agreement. The page reports unimplemented responses honestly.
+H1/H2 below are implemented at the user's request on 2026-11-17, based on Nam's demo requirements.
+Other proposals still need their owners' agreement. The page reports unimplemented responses honestly.
 
-| Route | Owner | Proposed shape |
+| Route | Owner | Shape / status |
 |---|---|---|
 | `GET /api/v1/qr/{empId}` | Khoa | same body as §1 (`qrPayload`, `expiresAt`, `periodSeconds`); the bare §1 `qrPayload` is also accepted. Revoked: `409 {"code":"QR_REVOKED"}`. The page draws `qrPayload` as a QR image and never shows the TOTP digits |
 | `POST /api/v1/qr/{empId}/rotate` | Khoa | `{}` → 200; new `secret_version`, new secret, old code invalid at kiosks after their next whitelist refresh |
 | `POST /api/v1/qr/{empId}/revoke` | Khoa | `{"reason":"…"}` → 200; `qr_status = REVOKED`; audit log entry |
-| `GET /api/v1/attendance/events?limit=20` | Khôi | `{"events":[ §4 event … ]}` newest first. Until it exists the page looks up each queued id with the dev route `GET /api/dev/attendance/events/{id}` |
-| `POST /api/dev/kiosk/whitelist/sync` | Khôi | runs `SyncWhitelistUseCase` once; 200 |
+| `GET /api/v1/attendance/events?limit=20&employeeId=EMP001` | Khôi | H1, **dev profile only**: `{"events":[ §4 event … ]}`, newest first, fixtures included; details below |
+| `POST /api/dev/kiosk/whitelist/sync` | Khôi | H2, **dev profile only**: runs the existing shared `SyncWhitelistUseCase` once; only `UPDATED` / `NOT_NEWER` return 200; details below |
 | `POST /api/local/scan` response `reason` | Khánh | on `REJECTED`: `EXPIRED`, `INVALID_TOTP`, `REPLAYED`, `REVOKED`, `UNKNOWN_EMPLOYEE` |
 
 **Security:** the three QR routes are unauthenticated by request of the M2 brief ("demo"). Anyone who knows an
@@ -271,9 +272,9 @@ move behind `@Profile("dev")` (as `/api/dev/**`) or require the employee's JWT l
 `GET /api/v1/qr/generate` mapping: `scripts/smoke.sh` expects it to answer 501.
 
 The requested User/QR alignment is recorded in [DECISIONS B27](DECISIONS.md#bootstrap-decisions), pending owner review.
-The remaining proposals do not become approved contracts through that change.
+The remaining proposals do not become approved contracts through that change. H1/H2 add no production authorization.
 
-**What the merged `develop` really answers (2026-11-16, code inspection):**
+**Historical baseline on merged `develop` (2026-11-16, code inspection; H1/H2 superseded below):**
 
 | Route | Today | Gap with the proposal |
 |---|---|---|
@@ -282,6 +283,37 @@ The remaining proposals do not become approved contracts through that change.
 | `GET /api/v1/attendance/events?limit=` | not implemented; the only list is `GET /api/dev/attendance/history?employeeId&factoryId&fromInclusive&toExclusive&page&size`, oldest first, **fixtures excluded** | `/demo` column 3 falls back to per-id lookups; the history route cannot show synthetic events |
 | `POST /api/dev/kiosk/whitelist/sync` | not implemented (no whitelist endpoint on the kiosk) | button answers 404 |
 | `POST /api/local/scan` | 501 | Khánh: [handoff](../kiosk-agent/README.md#handoff-qr-scan-for-khánh-2026-11-16) |
+
+### H1 and H2 dev demo routes (2026-11-17)
+
+H1 is an explicit demo exception to the v1-path convention, registered only under profile `dev`.
+`limit` defaults to 20 and accepts 1..100. Optional `employeeId` is an exact SQL filter after whitespace
+normalization; a supplied empty value, more than 32 characters or control characters returns 400 `VALIDATION_ERROR`.
+Non-integer/out-of-range limits also return 400. It reads all factories, both scan results and fixtures;
+there is no implicit factory authorization. Events sort by `occurredAt DESC, attendanceId DESC` before LIMIT.
+An empty result is `{"events":[]}`; each event has exactly `attendanceId`, `employeeId`, `factoryId`, `gateId`,
+`direction`, `occurredAt`, `scanResult`, matching frontend `CentralEvent`. No pagination/hasNext is promised here.
+Storage failure returns 503 `STORAGE_UNAVAILABLE`. The existing History endpoint still excludes fixtures
+and keeps its scope/range/pagination/ascending-order semantics. Production ingestion POST routes stay 501.
+
+H2 takes no body and accepts no client-supplied factory/revision/credential. It delegates to the existing singleton;
+the flag stays false by default, and neither startup fetching nor scheduler behavior changes.
+
+| H2 outcome | HTTP | Body status/code |
+|---|---|---|
+| Committed newer snapshot / unchanged candidate | 200 | `{"status":"UPDATED","snapshotVersion":7}` / `{"status":"NOT_NEWER","snapshotVersion":7}` |
+| Offline / already running | 409 | `CENTRAL_SYNC_DISABLED` / `WHITELIST_SYNC_IN_PROGRESS` |
+| Flag false / use case unavailable | 503 | `WHITELIST_SYNC_DISABLED` / `WHITELIST_SYNC_UNAVAILABLE` |
+| Source / cache unavailable or invalid cache | 503 | `WHITELIST_SOURCE_UNAVAILABLE` / `WHITELIST_CACHE_UNAVAILABLE` / `WHITELIST_CACHE_INVALID` |
+| Invalid source snapshot | 502 | `INVALID_WHITELIST_SNAPSHOT` |
+| Unexpected failure | 500 | `WHITELIST_SYNC_FAILED` |
+
+On `NOT_NEWER`, `snapshotVersion` is the fetched candidate's version, not necessarily the stored version.
+Failures use `{code,message,correlationId}` with fixed safe messages; none are converted into a 2xx.
+Both routes return `X-TMC-Dev-Only: true` and `Cache-Control: no-store`.
+They are unauthenticated: use only synthetic data on a trusted dev machine. Existing gateway prefixes already
+forward both paths without rewriting. Deployed gateway/browser acceptance remains separate from mock HTTP tests.
+Reviewers: Khôi (implementation), Khiêm (frontend), Nam/Khoa (integration); see the recorded decision.
 
 ## API docs deliverable
 

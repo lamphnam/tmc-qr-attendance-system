@@ -20,10 +20,17 @@ import vn.edu.hcmut.tmc.attendance.domain.model.AttendanceRecord;
 import vn.edu.hcmut.tmc.attendance.domain.model.Direction;
 import vn.edu.hcmut.tmc.attendance.domain.model.ScanResult;
 import vn.edu.hcmut.tmc.attendance.domain.repository.IAttendanceHistoryQuery;
+import vn.edu.hcmut.tmc.attendance.domain.repository.IAttendanceEventsQuery;
 
 /** A single parameterized SELECT against the existing central DataSource; no ingestion transaction is involved. */
 @Repository
-public class PostgresAttendanceHistoryQuery implements IAttendanceHistoryQuery {
+public class PostgresAttendanceHistoryQuery implements IAttendanceHistoryQuery, IAttendanceEventsQuery {
+
+    private static final String SELECT_RECENT = """
+            SELECT attendance_id, employee_id, factory_id, gate_id, direction, occurred_at,
+                   scan_result, source_kiosk_id, dev_fixture
+              FROM attendance_events
+            """;
 
     private static final String SELECT_HISTORY = """
             SELECT attendance_id, employee_id, factory_id, gate_id, direction, occurred_at,
@@ -41,6 +48,19 @@ public class PostgresAttendanceHistoryQuery implements IAttendanceHistoryQuery {
 
     public PostgresAttendanceHistoryQuery(JdbcTemplate jdbc) {
         this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
+    }
+
+    @Override
+    public List<AttendanceRecord> findRecent(int limit, String employeeId) {
+        try {
+            // Only fixed SQL fragments are selected here; both filter and limit remain bound parameters.
+            String sql = SELECT_RECENT + (employeeId == null ? "" : " WHERE employee_id = ?")
+                    + " ORDER BY occurred_at DESC, attendance_id DESC LIMIT ?";
+            return List.copyOf(employeeId == null ? jdbc.query(sql, ROW_MAPPER, limit)
+                    : jdbc.query(sql, ROW_MAPPER, employeeId, limit));
+        } catch (DataAccessException failure) {
+            throw new AttendanceStorageException("attendance events storage unavailable", failure);
+        }
     }
 
     @Override

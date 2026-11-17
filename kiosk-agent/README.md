@@ -16,6 +16,7 @@ The local whitelist domain and SQLite snapshot store are implemented, including 
 | `POST /api/dev/kiosk/synthetic-event` | **DEV-ONLY**. Synthetic event with **no QR/TOTP check**: commit PENDING to SQLite, *then* call the local turnstile |
 | `GET /api/dev/kiosk/queue` | **DEV-ONLY** counts + recent rows read from SQLite |
 | `POST /api/dev/kiosk/sync/run` | **DEV-ONLY** one sync pass now (a scheduler also runs every 5 s) |
+| `POST /api/dev/kiosk/whitelist/sync` | **DEV-ONLY** H2 manual whitelist trigger; existing feature/offline/revision/concurrency guards apply |
 | `PUT /api/dev/kiosk/sync/offline` `{"disabled":true}` | **DEV-ONLY** stops **only** kiosk → central sync (D05); the turnstile keeps working |
 | `GET /actuator/health` | UP only if the SQLite file opens, the queue table is readable and `journal_mode = wal` (`sqliteQueue` component) |
 
@@ -162,6 +163,26 @@ the use-case/store contract. There is no extra retry loop or second sync lock.
 Tests cover lifecycle/timing, invalid/default configuration, offline and singleton concurrency, plus a real scheduled
 HTTP-mock 503 → next-cycle encrypted SQLite commit. Central's actual monotonic revision/consistent factory snapshot
 and production factory authorization still need verification; enabling the flag does not establish either.
+
+## Manual whitelist sync (H2)
+
+With profile `dev`, `/demo` can POST `/api/dev/kiosk/whitelist/sync` with no body through the existing gateway
+kiosk prefix. The controller calls the same singleton `SyncWhitelistUseCase.run()` as the scheduler;
+it never fetches HTTP, encrypts material or writes SQLite itself. Only `UPDATED` / `NOT_NEWER` return 200
+`{"status":"UPDATED","snapshotVersion":7}` (or `NOT_NEWER`). The latter reports the candidate revision,
+which can be below the stored version. A successful update is reported only after commit.
+
+Flag false returns 503 `WHITELIST_SYNC_DISABLED`; missing use case returns 503 `WHITELIST_SYNC_UNAVAILABLE`.
+Offline returns 409 `CENTRAL_SYNC_DISABLED`; an active pass returns 409 `WHITELIST_SYNC_IN_PROGRESS`.
+Invalid source data returns 502; unavailable source/cache or invalid cache returns 503; unexpected failure
+returns a fixed 500. Full error codes: [API contract](../docs/API-CONTRACTS.md#h1-and-h2-dev-demo-routes-2026-11-17).
+Errors never echo sensitive diagnostics. Responses carry no employees or secrets and use no-store.
+
+This endpoint is unauthenticated and absent outside `dev`; keep it on a trusted synthetic-data machine.
+The existing flag remains **false by default**. Enabling it still requires a matching dev `KIOSK_API_KEY`,
+an externally provisioned `KIOSK_WHITELIST_KEY_BASE64`, configured identity and a revision-capable Central.
+No startup fetch or automatic dev flag/key provisioning is added here (H3/H4 remain separate work).
+Real-stack/browser acceptance has not been rerun; [current evidence](../docs/STATUS.md#20-h1h2-demo-endpoints-2026-11-17).
 
 ## Handoff: QR scan for Khánh (2026-11-16)
 

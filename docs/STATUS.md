@@ -34,12 +34,12 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 | `nginx-gateway` | Nam / Khoa | **READY** (routing only) | `/gateway/health` | `/services/*/health`, every `/api/v1/*` area reaches its service, JSON 404 for unknown paths (prevents a proxy loop), `X-Request-Id` | TLS/mTLS, authentication, rate limit, CORS allowlist |
 | `user-qr-service` | Khoa | **DEV_SLICE** | `/services/user-qr/health` | dev-only employee-ID QR lifecycle, RFC 6238 TOTP, key-protected factory whitelist, transactional audit chain; K1–K4 implementation and current verification in §18. Required factory scope, consistent `X-Whitelist-Version` including empty arrays, `qrPayload`, `periodSeconds:30`, `409 QR_REVOKED`. Default profile and `/qr/generate` remain 501 | JWT/RBAC, production kiosk identity/factory authorization, Central encryption at rest, HR sync/public membership API, restricted audit DB role/external anchor, MFA |
 | `gate-station-service` | Khôi | **SCAFFOLD** | `/services/gate-station/health` | boots + real health; `POST /api/v1/gates`, `GET …/status`, `POST …/manual-open` answer **501** | registration, heartbeat, manual open + audit |
-| `attendance-processor` | Khôi | **DEV_SLICE** | `/services/attendance/health` | real idempotent ingestion and dev-only history GET via `/api/dev/attendance/*`; history reuses the bounded employee/factory/time query, excludes fixtures, and has no authorization. Latest verification: §13; earlier Docker skips: §12. Production ingestion POST routes answer **501**; no production History GET route | authenticated production routes, authorized history access, end-to-end rejected scans (D06), reference-validation policy |
+| `attendance-processor` | Khôi | **DEV_SLICE** | `/services/attendance/health` | real idempotent ingestion and dev-only history GET via `/api/dev/attendance/*`; history excludes fixtures. H1 dev-only `GET /api/v1/attendance/events` supplies `/demo` with fixtures, newest first. Latest H1/H2 verification: §20; earlier PostgreSQL evidence: §§13/19. Production ingestion POST routes answer **501**; no production History GET route | authenticated production routes, authorized history access, end-to-end rejected scans (D06), reference-validation policy |
 | `reporting-service` | Nam | **DEV_SLICE** | `/services/reporting/health` | (2026-11-15, §3 rows 16–18) factory report and dashboard in Asia/Ho_Chi_Minh days, ALLOWED-only, fixtures excluded unless opted in; monthly HR export with a period-derived `batch_uuid`, frozen items, 01:00 schedule with catch-up, backoff until created + 5 h, FAILED + log alert, compare-and-set claims; two payroll channels (`rest`, `file`) under one contract test. Only via `/api/dev/reports/*`; `/api/v1/reports/*` answer **501** | authentication/roles, shift dimension, mail alert, re-export of late events, NFR-7 measurement |
 | `kiosk-agent` | Khánh | **DEV_SLICE** | `/services/kiosk/health`; host `8085` | SQLite WAL + `synchronous=FULL`; PENDING committed before the turnstile call; sync by per-id ack with backoff; FAILED only on a per-event rejection; the offline switch cuts only kiosk → central; health reads the real SQLite file. Whitelist domain, atomic SQLite snapshots and local AES-256-GCM secret protection implemented (D08 update below); HTTP source/use case/scheduler behind `KIOSK_WHITELIST_SYNC_ENABLED` (default false), mock Central tests in §§14–16; B27 supplies the real Central revision header (§18). `POST /api/local/scan` answers **501** | QR scan, TOTP verification, anti-replay (`used_tokens` table unused), rejected scans (handoff: [kiosk README](../kiosk-agent/README.md#handoff-qr-scan-for-khánh-2026-11-16)); startup fetch; dev AES key provisioning; key lifecycle, heartbeat, manual open, production auth to central |
 | `mock-turnstile-api` | Khánh | **MOCK** | `/health`; host `8090` | `POST /gates/{id}/open`, command counting, failure injection; always `physicalOpenConfirmed:false` | contract is invented by the bootstrap (B18) |
 | `mock-hr-payroll-api` | Nam | **MOCK** | `/health`; host `8091` | idempotent upsert by `attendanceId`, `duplicateBatch`, 4xx/5xx injection, state survives a container restart, `GET /mock/hr/employees` | HR contract is DRAFT (D09/D10) |
-| `web-frontend` | Khiêm | **DEV_SLICE** | `/` (gateway 8080 or host 3000); `/demo` | *Status* page (real health every 10 s), *Dev slice* page, five placeholders labelled **Not implemented**. `/demo` has employee QR image, kiosk controls/queue and central inspection. User/QR's dev response now matches the QR payload/period/revoked-code expectations (§18); offline/sync/queue and per-id central lookup use real dev endpoints. Central list and explicit whitelist-sync routes remain proposals ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed)). 118 Vitest tests re-run in §18; historical Chrome layout checks (1440/1366/1280/390 px) in §3 | login, real scan (`/api/local/scan` is 501), Guard/HR/Admin pages, dashboard with business data; no new browser visual QA in §18 |
+| `web-frontend` | Khiêm | **DEV_SLICE** | `/` (gateway 8080 or host 3000); `/demo` | *Status* page (real health every 10 s), *Dev slice* page, five placeholders labelled **Not implemented**. `/demo` has employee QR image, kiosk controls/queue and central inspection. User/QR's dev response matches QR expectations (§18). H1/H2 now supply the existing frontend's Central list/manual whitelist paths ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-draft)); backend contract tests in §20, no frontend source change. 118 Vitest tests re-run in §18; historical Chrome layout checks in §3 | login, real scan (`/api/local/scan` is 501), Guard/HR/Admin pages; H1/H2 deployed gateway/browser acceptance not rerun |
 | `tests/integration` | Nam | **READY** (dev slice) | see README §4 | §18: `slice.test.mjs` 8, `user-qr.test.mjs` 2, `reporting.test.mjs` 3; all pass sequentially on the K1–K4 tree, no skips | end-to-end real scan/auth tests (owners add) |
 | `tests/load` | Nam | **NOT_IMPLEMENTED** | — | (2026-11-17) T01 script `k6/peak-scan-load.js` and fixture `fixtures/load-employees.sql` written, **NOT_RUN** (scan answers 501); only `SCENARIO=selftest` was run (k6 v1.7.1, exit 0: TOTP matches the Java vectors). `health-baseline.js` NOT_TESTED | NFR-1 / NFR-7 |
 | `scripts/smoke.sh`, `smoke.ps1` | Nam | **READY** | — | §18: 35 checks per script, exit 0; non-zero exit on any failure | — |
@@ -90,6 +90,9 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 - Harmless warnings: Mockito "self-attaching" agent (a future JDK will forbid it); npm `install-scripts` notice for esbuild.
 
 ## 5. Dev-only / mock items (must not reach a "production" build)
+
+H1 adds `GET /api/v1/attendance/events` as an explicit **dev-profile-only** path exception; H2 adds
+`POST /api/dev/kiosk/whitelist/sync`. Both are unauthenticated, synthetic-data-only (B29).
 
 `/api/dev/attendance/*`, `/api/dev/kiosk/*` and `/api/dev/reports/*` (profile `dev`, unauthenticated) · the three matching `location` blocks in `nginx-gateway/nginx.conf` · `REPORTING_INCLUDE_DEV_FIXTURES=true` in Compose (reports and the HR export count fixture rows, B26) · `QueueSyntheticEventUseCase` (synthetic events, no QR/TOTP) · column `attendance_events.dev_fixture` · `mock-turnstile-api`, `mock-hr-payroll-api` · password `dev-only-change-me` · `HEALTH_SHOW_DETAILS=always` · `kiosk.central.sync-path=/api/dev/attendance/sync`. · `web-frontend` `/demo` (calls the dev routes above; uses the synthetic employees EMP001–EMP004)
 
@@ -351,7 +354,7 @@ không cảnh báo dòng trùng hoặc lỗi whitespace. Không chạy Docker Co
 
 `NOT_RUN` on the merged tree: Testcontainers, `docker compose up`, smoke, integration (`slice`, `user-qr`, `reporting`). The schema of `employees`, `audit_logs` and `hr_export_*` changed, so an existing volume needs `docker compose down -v` before `node scripts/verify.mjs`.
 
-Known cross-module gaps at that pre-K1–K4 snapshot (code inspection, not test failures): User/QR sent no `X-Whitelist-Version`; `/demo` expected a QR shape and revoked code that User/QR did not return. These User/QR gaps are addressed in §18. The central event list and kiosk whitelist-sync endpoint remain absent ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed)); `POST /api/local/scan` still answers 501. Owners and tasks: [TODO](TODO.md).
+Known cross-module gaps at that pre-K1–K4 snapshot (code inspection, not test failures): User/QR sent no `X-Whitelist-Version`; `/demo` expected a QR shape and revoked code that User/QR did not return. These User/QR gaps are addressed in §18. At that historical snapshot the Central list/manual whitelist endpoint were absent; H1/H2 now implement them in §20 ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-draft)). `POST /api/local/scan` still answers 501. Owners and tasks: [TODO](TODO.md).
 
 ## 18. User/QR K1–K4 contract alignment (2026-11-16)
 
@@ -419,3 +422,62 @@ Tree: `develop` at `94e450f` plus the uncommitted B28 docs, the T01 load files a
 `verify.mjs` printed "? tests passed" for the frontend because Vitest colours its summary; the count is now read after stripping ANSI escapes (re-run `--only frontend`: 118).
 
 Still not exercised: the kiosk scan (501), whitelist sync in the default Compose (flag off, no dev AES key), NFR-1 and NFR-7.
+
+## 20. H1/H2 demo endpoints (2026-11-17)
+
+Git preparation: clean `feat/kiosk-whitelist-sync` at `6a0870c`; `git fetch origin` exit 0,
+HEAD was an ancestor of `origin/develop` (0 ahead / 9 behind), then authorized
+`git merge --ff-only origin/develop` exit 0 → `353cebc`. Same branch; no merge commit, staging or push.
+H1/H2 changes remain uncommitted. Module labels stay DEV_SLICE.
+
+H1 supplies a dev-only bounded fixture-inclusive Central list using a separate domain read capability
+and the existing PostgreSQL query adapter. History's fixture exclusion/ascending range pages and ingestion
+are unchanged. H2 supplies a dev-only manual trigger using the existing singleton and its guards;
+only UPDATED/NOT_NEWER are 200. [Wire/errors/security](API-CONTRACTS.md#h1-and-h2-dev-demo-routes-2026-11-17), B29.
+
+Environment here: Windows, JDK 23.0.1 compiling release 21. `docker version` and `docker ps -a` both exited 1:
+Docker Client 28.0.1 was available, but `dockerDesktopLinuxEngine` named pipe was absent. No daemon configuration,
+Compose, container or volume was changed. Testcontainers could not find a usable Docker environment.
+This is a separate machine/run from §19's full Docker evidence; it does not revoke or extend that result.
+
+| Command | Exit | PASS | FAIL | ERROR | SKIP |
+|---|---|---|---|---|---|
+| `mvn -B -ntp -pl backend-services/attendance-processor -Dtest=DevAttendanceEventsControllerWebTest,AttendanceEventsProfileWebTest,AttendanceHistoryPostgresIntegrationTest,AttendanceProcessorApplicationTest test` | 0 | 19 | 0 | 0 | 12 |
+| `mvn -B -ntp -pl kiosk-agent -Dtest=DevWhitelistSyncControllerWebTest,DevWhitelistSyncAvailabilityTest,WhitelistSyncProfileWebTest,WhitelistHttpSyncWiringTest test` | 0 | 39 | 0 | 0 | 0 |
+| `mvn -B -ntp -fae -pl backend-services/attendance-processor,kiosk-agent test` — Attendance | 0 | 108 | 0 | 0 | 18 |
+| Same full run — Kiosk | 0 | 374 | 0 | 0 | 0 |
+| `mvn -B -ntp -Dtest=*ArchitectureTest test` — all five Java modules | 0 | 15 | 0 | 0 | 0 |
+
+Final static checks: `node scripts/check-docs.mjs` exit 0 (30 Markdown files, 349 links, no warnings);
+`git diff --check` exit 0. The docs check initially found one obsolete §8 anchor in the frontend README;
+the reference and route-status row were updated, with no frontend application code changes.
+
+Full Attendance total is 126: 12 History PostgreSQL + 6 Idempotency PostgreSQL cases are skipped,
+including the two new H1 real-store tests (fixtures/newest-first/ties/limit/filter and unchanged History).
+They are written against PostgreSQL Testcontainers/canonical schema, not replaced by H2 or fake SQL results.
+Focused runs and ArchUnit reruns are not added to the module totals; five architecture cases are already
+included in the Attendance/Kiosk full run. Root ArchUnit now includes four Reporting architecture cases.
+
+H1 WebMvc tests verify seven frontend `CentralEvent` fields, validation, empty arrays, safe 503, dev-only
+registration and unchanged production POST 501s. H2 tests verify every report status, safe unexpected failure,
+missing flag/use case and non-dev 404. Production Spring composition + HTTP mock + real SQLite/AES additionally
+verify manual POST commits, rejects a recursive trigger through the same singleton guard and respects offline.
+Existing queue, encryption, rollback, scheduler and concurrency regressions also passed.
+
+Gateway route verification is static: `/api/v1/attendance/` and `/api/dev/kiosk/` already forward the unchanged
+paths/query strings. No nginx/config/frontend application/Scan/Central/schema changes. No H3/H4 startup fetch, flag enablement
+or dev AES provisioning. New H1 PostgreSQL tests and deployed gateway/browser acceptance remain NOT_RUN here;
+frontend dependencies are absent, so frontend Vitest was not rerun. Ask Nam to exercise both buttons/list on
+the Docker-capable demo stack with Khiêm; do not claim an end-to-end scan (still 501).
+
+Files in this handoff:
+
+- New Attendance production files: `IAttendanceEventsQuery`, `AttendanceEventsService`,
+  `DevAttendanceEventsController`, `AttendanceEventsResponseDto`. Existing `PostgresAttendanceHistoryQuery`
+  gains only the separate recent-list capability.
+- New Attendance tests: `DevAttendanceEventsControllerWebTest`, `AttendanceEventsProfileWebTest`.
+  Existing `AttendanceHistoryPostgresIntegrationTest` and `AttendanceProcessorApplicationTest` are extended.
+- New Kiosk production file: `DevWhitelistSyncController`. New tests: `DevWhitelistSyncControllerWebTest`,
+  `DevWhitelistSyncAvailabilityTest`, `WhitelistSyncProfileWebTest`; existing `WhitelistHttpSyncWiringTest` is extended.
+- Markdown: both module READMEs, `web-frontend/README.md` (reference/status only), `API-CONTRACTS`, `DECISIONS`,
+  `STATUS`, `TRACEABILITY`, `SOLID-GUIDELINES`, `TODO` under `docs/`.

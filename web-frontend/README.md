@@ -12,9 +12,9 @@ A standalone page (outside the scaffold shell) with three columns so the whole f
 2. **Kiosk BD-K01** — scan the current code into gate BD-G01/BD-G02, authorization result shown separately from the gate-command status, offline switch, sync now, whitelist sync, synthetic event, SQLite queue.
 3. **Central** — which queued ids are in PostgreSQL, and a resend of SYNCED rows that must answer `ALREADY_EXISTS`.
 
-| Works against the real stack today | Waits for an owner (page shows the real 404/405/501) |
+| Implemented backend routes (verification in STATUS) | Remaining integration work |
 |---|---|
-| offline switch, sync, queue, synthetic event (`/api/dev/kiosk/*`), per-id lookup and resend (`/api/dev/attendance/*`) | QR, rotate, revoke, central list, whitelist sync: proposals in [API-CONTRACTS §8](../docs/API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed); `POST /api/local/scan` answers 501 |
+| offline switch, sync, queue, synthetic event, per-id lookup/resend; User/QR K1–K4; H1 dev Central list and H2 dev manual whitelist trigger ([API-CONTRACTS §8](../docs/API-CONTRACTS.md#8-demo-main-flow-routes-draft)) | H1/H2 deployed gateway/browser acceptance still pending ([STATUS §20](../docs/STATUS.md#20-h1h2-demo-endpoints-2026-11-17)); whitelist flag defaults false and requires dev key provisioning; `POST /api/local/scan` still answers 501 |
 
 It relies on `/api/dev/**`, so it only works with the `dev` profile (Compose default) and uses synthetic data.
 

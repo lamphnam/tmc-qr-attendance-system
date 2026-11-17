@@ -1,6 +1,6 @@
 # TRACEABILITY — requirements ↔ code ↔ tests, and the Java class map
 
-The evidence column retains historical bootstrap and pre-merge Kiosk/User-QR verification. Latest Attendance Processor evidence is the separate post-merge module run in [STATUS §13](STATUS.md#13-attendance-processor-postgresql-recheck-2026-11-14), not a new whole-system test result. `TBD`/empty means nothing yet. Owners update their rows in the PR that changes the status; also update STATUS and `web-frontend/src/catalog.ts` when changing a module label. Status vocabulary: [STATUS](STATUS.md#status-labels); `NOT_MEASURED` = a measurable NFR with no measurement.
+The evidence column retains historical bootstrap and pre-merge Kiosk/User-QR verification. Latest H1/H2 evidence and Docker limitations are in [STATUS §20](STATUS.md#20-h1h2-demo-endpoints-2026-11-17); historical full PostgreSQL runs remain in §§13/19, not proof that the new H1 SQL tests ran. `TBD`/empty means nothing yet. Owners update their rows in the PR that changes the status; also update STATUS and `web-frontend/src/catalog.ts` when changing a module label. Status vocabulary: [STATUS](STATUS.md#status-labels); `NOT_MEASURED` = a measurable NFR with no measurement.
 
 ## FR / NFR / ADR matrix
 
@@ -49,6 +49,7 @@ Names the team proposed in its design trees (companion text files in the `NAM` D
 |---|---|
 | `KioskAgentApplication` | done |
 | `presentation/controller/KioskScanController` | exists; answers **501** (transport only when implemented) |
+| `presentation/controller/DevWhitelistSyncController` | H2 dev-only POST delegates to the existing singleton, no direct HTTP/SQLite/AES logic. Non-2xx for disabled/unavailable/offline/busy/failed sync; HTTP-mock → real SQLite and shared-guard test in STATUS §20. Default flag still false; no startup fetch |
 | `presentation/dto/QrScanRequestDto` | done (TOTP redacted in `toString`) |
 | `presentation/dto/ScanResultResponseDto` | **not created** |
 | `application/usecase/ProcessQrScanUseCase` | **not created** — verify offline, persist the durable event **and** the used token atomically, then command the gate via `ITurnstileAdapter`. `QueueSyntheticEventUseCase` shows the commit-then-open ordering |
@@ -77,6 +78,7 @@ Names the team proposed in its design trees (companion text files in the `NAM` D
 |---|---|
 | `AttendanceProcessorApplication` | done |
 | `presentation/controller/AttendanceController` | exists; answers **501** until auth + contract are agreed (B04) |
+| `presentation/controller/DevAttendanceEventsController`; `presentation/dto/AttendanceEventsResponseDto`; `application/service/AttendanceEventsService`; `domain/repository/IAttendanceEventsQuery` | H1 dev-only bounded Central list including fixtures, optional employee filter, newest-first with stable ID tie-break. Reuses `AttendanceEventDto` and existing PostgreSQL read adapter, not History/write capabilities. Web/profile/validation/frontend shape verified; 2 new real-PostgreSQL cases written but skipped without Docker (STATUS §20). No production authorization |
 | `presentation/mapper/AttendanceSyncResponseMapper` | done (separate per-event ack mapping) |
 | `presentation/dto/BatchSyncRequestDto` | done (+ `BatchSyncResponseDto`, `AttendanceEventDto`, `EventAckDto`, `ErrorResponseDto`) |
 | `application/service/AttendanceIngestionService` | implemented/tested: one transaction per event, ACK after commit, duplicate/conflict classification and retryable storage/commit failure; [verification](STATUS.md#13-attendance-processor-postgresql-recheck-2026-11-14) |

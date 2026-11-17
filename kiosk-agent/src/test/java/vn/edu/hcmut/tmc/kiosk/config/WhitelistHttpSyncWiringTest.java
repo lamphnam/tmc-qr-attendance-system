@@ -6,6 +6,9 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -28,6 +31,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.sql.DataSource;
 
@@ -48,6 +52,8 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DelegatingDataSource;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.client.RestClient;
 
 import vn.edu.hcmut.tmc.kiosk.KioskAgentApplication;
@@ -66,6 +72,7 @@ import vn.edu.hcmut.tmc.kiosk.infrastructure.persistence.SQLiteWhitelistReposito
 import vn.edu.hcmut.tmc.kiosk.infrastructure.persistence.SqliteConfig;
 import vn.edu.hcmut.tmc.kiosk.infrastructure.security.WhitelistSecretCodec;
 import vn.edu.hcmut.tmc.kiosk.infrastructure.sync.RestWhitelistSnapshotSource;
+import vn.edu.hcmut.tmc.kiosk.presentation.controller.DevWhitelistSyncController;
 
 /** Real Spring composition, SQLite and AES; only Central HTTP is mocked. All triggers are explicit test calls. */
 @ExtendWith(OutputCaptureExtension.class)
@@ -432,6 +439,42 @@ class WhitelistHttpSyncWiringTest {
                                 .doesNotHaveBean(SyncWhitelistUseCase.class);
                     }
                     assertThat(application.getBean(SQLiteWhitelistRepository.class).inspect()).isEmpty();
+                });
+    }
+
+    @Test
+    void manualHttpTriggerUsesTheSharedGuardAndCommitsThroughTheRealPipeline() {
+        seedOld();
+        var mvcRef = new AtomicReference<MockMvc>();
+        http.expect(requestTo(URL)).andRespond(request -> {
+            assertThat(transactions).hasValue(0);
+            try {
+                mvcRef.get().perform(post("/api/dev/kiosk/whitelist/sync"))
+                        .andExpect(status().isConflict())
+                        .andExpect(jsonPath("$.code").value("WHITELIST_SYNC_IN_PROGRESS"));
+            } catch (Exception failure) {
+                throw new java.io.IOException("manual trigger test failed", failure);
+            }
+            return withSuccess(employees(), MediaType.APPLICATION_JSON).header("X-Whitelist-Version", "5")
+                    .createResponse(request);
+        });
+        context.withUserConfiguration(DevWhitelistSyncController.class)
+                .withPropertyValues("spring.profiles.active=dev").run(application -> {
+                    assertThat(application).hasSingleBean(SyncWhitelistUseCase.class);
+                    var mvc = MockMvcBuilders
+                            .standaloneSetup(application.getBean(DevWhitelistSyncController.class)).build();
+                    mvcRef.set(mvc);
+                    mvc.perform(post("/api/dev/kiosk/whitelist/sync"))
+                            .andExpect(status().isOk())
+                            .andExpect(jsonPath("$.status").value("UPDATED"))
+                            .andExpect(jsonPath("$.snapshotVersion").value(5));
+                    assertThat(stored.inspect().orElseThrow().version()).isEqualTo(5);
+                    assertThat(stored.lookup("NEW").employee()).isPresent();
+                    centralSync.setDisabled(true);
+                    mvc.perform(post("/api/dev/kiosk/whitelist/sync"))
+                            .andExpect(status().isConflict())
+                            .andExpect(jsonPath("$.code").value("CENTRAL_SYNC_DISABLED"));
+                    assertThat(stored.inspect().orElseThrow().version()).isEqualTo(5);
                 });
     }
 
