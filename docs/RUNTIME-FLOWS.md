@@ -32,6 +32,9 @@ sequenceDiagram
 - QR expires on TOTP step boundary; reject stale/invalid/duplicate locally.
 - When turnstile returns error after local commit, preserve event + gate command failure info; don't falsely report physical opening.
 - Central ack delayed/lost AFTER commit → retry same `attendanceId`; no duplicate insert.
+- In the dev slice, User/QR issues the demo payload on `GET /api/v1/qr/{employeeId}`. The kiosk background worker uses
+  `/api/dev/attendance/sync` for both single-item batches and offline backlog. A business rejection commits to
+  SQLite's `rejected_scan_audit` table and ends without entering the Central queue.
 
 ## Flow B — Lost WAN + recovery [BASELINE-M1]
 

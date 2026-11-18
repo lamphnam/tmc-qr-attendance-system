@@ -49,6 +49,11 @@ SQLite operational choices from team plan: WAL + `synchronous=FULL` (verify actu
 
 M1: **all scanned attempts including REJECTED should be logged**, while the team snippet for `local_attendance_events` only queues valid scans. Choose a separate `scan_audit_events` table or a universal event schema with `scan_result`; never lose rejected scans; a rejection must never trigger a gate command; decide which rejected records sync to central before calling the feature complete.
 
+The dev scan queues accepted events with the matched counter inserted into `used_tokens` in the same
+transaction. Rejected decisions enter `rejected_scan_audit` with scan ID, employee ID, gate, direction,
+time and reason. The table stores no TOTP, shared secret or raw payload. It is independent of attendance
+sync. [B31](DECISIONS.md#bootstrap-decisions) records the local-only policy proposal.
+
 ## Idempotency design [BASELINE-M1 + DRAFT implementation]
 
 (The decision itself is ADR-01 in [ARCHITECTURE](ARCHITECTURE.md#adr-01--offline-first-sync-baseline-m1); these are the persistence rules that implement it.)

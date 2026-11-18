@@ -7,8 +7,8 @@
 -- run uses a different employee.
 --
 -- Not part of init-db/seed.sql on purpose: run it only on a load-test stack, ideally a separate
--- Compose project (see tests/load/README.md), because the scans it enables create real
--- attendance rows (not dev_fixture) that reports and the HR export will count.
+-- Compose project (see tests/load/README.md). The authorized scans sync via dev ingress;
+-- reports and exports can include those fixture rows when the Compose flag is enabled.
 --
 -- Follows the B27 rule for writers outside the application: for every inserted employee, in one
 -- transaction, bump factories.whitelist_version and append an audit row to the SHA-256 chain

@@ -35,13 +35,13 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 | `user-qr-service` | Khoa | **DEV_SLICE** | `/services/user-qr/health` | dev-only employee-ID QR lifecycle, RFC 6238 TOTP, key-protected factory whitelist, transactional audit chain; K1–K4 implementation and current verification in §18. Required factory scope, consistent `X-Whitelist-Version` including empty arrays, `qrPayload`, `periodSeconds:30`, `409 QR_REVOKED`. Default profile and `/qr/generate` remain 501 | JWT/RBAC, production kiosk identity/factory authorization, Central encryption at rest, HR sync/public membership API, restricted audit DB role/external anchor, MFA |
 | `gate-station-service` | Khôi | **SCAFFOLD** | `/services/gate-station/health` | boots + real health; `POST /api/v1/gates`, `GET …/status`, `POST …/manual-open` answer **501** | registration, heartbeat, manual open + audit |
 | `attendance-processor` | Khôi | **DEV_SLICE** | `/services/attendance/health` | real idempotent ingestion and dev-only history GET via `/api/dev/attendance/*`; history excludes fixtures. H1 dev-only `GET /api/v1/attendance/events` supplies `/demo` with fixtures, newest first. Latest H1/H2 verification: §20; earlier PostgreSQL evidence: §§13/19. Production ingestion POST routes answer **501**; no production History GET route | authenticated production routes, authorized history access, end-to-end rejected scans (D06), reference-validation policy |
-| `reporting-service` | Nam | **DEV_SLICE** | `/services/reporting/health` | (2026-11-15, §3 rows 16–18) factory report and dashboard in Asia/Ho_Chi_Minh days, ALLOWED-only, fixtures excluded unless opted in; monthly HR export with a period-derived `batch_uuid`, frozen items, 01:00 schedule with catch-up, backoff until created + 5 h, FAILED + log alert, compare-and-set claims; two payroll channels (`rest`, `file`) under one contract test. Only via `/api/dev/reports/*`; `/api/v1/reports/*` answer **501** | authentication/roles, shift dimension, mail alert, re-export of late events, NFR-7 measurement |
-| `kiosk-agent` | Khánh | **DEV_SLICE** | `/services/kiosk/health`; host `8085` | SQLite WAL/FULL queue, per-ID ACK/backoff, offline switch, Whitelist snapshots/AES-GCM/HTTP source/use case/scheduler and H2 manual trigger. H3 queues an initial pass after Ready only in dev + enabled; H4 provisions/reuses an external local AES key. Standalone/example flag defaults false; dev-only Compose explicitly enables it and requires a key. Latest verification: §21; historical Central header evidence: §18. `POST /api/local/scan` remains **501** | QR scan, TOTP verification, anti-replay (`used_tokens` integration), rejected scans ([handoff](../kiosk-agent/README.md#handoff-qr-scan-for-khánh-2026-11-16)); H3/H4 deployed gateway acceptance; production key lifecycle, heartbeat, manual open, auth |
+| `reporting-service` | Nam | **DEV_SLICE** | `/services/reporting/health` | (2026-11-15, §3 rows 16–18) factory report and dashboard in Asia/Ho_Chi_Minh days, ALLOWED-only, fixtures excluded unless opted in; monthly HR export with a period-derived `batch_uuid`, frozen items, 01:00 schedule with catch-up, backoff to the period cutoff, FAILED + log alert, compare-and-set claims; two payroll channels (`rest`, `file`) under one contract test. Only via `/api/dev/reports/*`; `/api/v1/reports/*` answer **501** | authentication/roles, shift dimension, mail alert, re-export of late events, NFR-7 measurement |
+| `kiosk-agent` | Khánh | **DEV_SLICE** | `/services/kiosk/health`; host `8085` | Real dev QR scan using local whitelist/TOTP, atomic `used_tokens` + PENDING commit before gate command, per-ID ack/backoff and local rejected-scan audit. AES-GCM cache, H2 manual refresh and H3/H4 startup/key provisioning. Evidence: [§22](#22-dev-qr-scan-2026-11-18) | Audit retention/central replication (D06), production key lifecycle/auth, heartbeat, manual open |
 | `mock-turnstile-api` | Khánh | **MOCK** | `/health`; host `8090` | `POST /gates/{id}/open`, command counting, failure injection; always `physicalOpenConfirmed:false` | contract is invented by the bootstrap (B18) |
 | `mock-hr-payroll-api` | Nam | **MOCK** | `/health`; host `8091` | idempotent upsert by `attendanceId`, `duplicateBatch`, 4xx/5xx injection, state survives a container restart, `GET /mock/hr/employees` | HR contract is DRAFT (D09/D10) |
-| `web-frontend` | Khiêm | **DEV_SLICE** | `/` (gateway 8080 or host 3000); `/demo` | *Status* page (real health every 10 s), *Dev slice* page, five placeholders labelled **Not implemented**. `/demo` has employee QR image, kiosk controls/queue and central inspection. User/QR's dev response matches QR expectations (§18). H1/H2 now supply the existing frontend's Central list/manual whitelist paths ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-draft)); backend contract tests in §20, no frontend source change. 118 Vitest tests re-run in §18; historical Chrome layout checks in §3 | login, real scan (`/api/local/scan` is 501), Guard/HR/Admin pages; H1/H2 deployed gateway/browser acceptance not rerun |
-| `tests/integration` | Nam | **READY** (dev slice) | see README §4 | §18: `slice.test.mjs` 8, `user-qr.test.mjs` 2, `reporting.test.mjs` 3; all pass sequentially on the K1–K4 tree, no skips | end-to-end real scan/auth tests (owners add) |
-| `tests/load` | Nam | **NOT_IMPLEMENTED** | — | (2026-11-17) T01 script `k6/peak-scan-load.js` and fixture `fixtures/load-employees.sql` written, **NOT_RUN** (scan answers 501); only `SCENARIO=selftest` was run (k6 v1.7.1, exit 0: TOTP matches the Java vectors). `health-baseline.js` NOT_TESTED | NFR-1 / NFR-7 |
+| `web-frontend` | Khiêm | **DEV_SLICE** | `/` (gateway 8080 or host 3000); `/demo` | *Status* page (real health every 10 s), *Dev slice* page, five placeholders labelled **Not implemented**. `/demo` has employee QR image, kiosk controls/queue and central inspection. User/QR's dev response matches QR expectations (§18). H1/H2 now supply the existing frontend's Central list/manual whitelist paths ([API-CONTRACTS §8](API-CONTRACTS.md#8-demo-main-flow-routes-draft)); backend contract tests in §20, no frontend source change. 118 Vitest tests re-run in §18; historical Chrome layout checks in §3 | login, Guard/HR/Admin pages and production auth; browser acceptance recorded in §23 |
+| `tests/integration` | Nam | **READY** (dev slice) | see README §4 | 19 Compose cases passed with 0 skipped, including real scan, rejection, browser-compatible routes, 20-scan restart and reporting. [Evidence](#23-m2-follow-up-and-compose-acceptance-2026-11-18) | Authenticated production scenarios |
+| `tests/load` | Nam | **DEV_SLICE** | k6 and BD/date report probe | T01 BD steady and T06 BD/date measured against fresh dev Compose data. [Results](#23-m2-follow-up-and-compose-acceptance-2026-11-18) | Physical gate, LA deployment, report shift and role checks |
 | `scripts/smoke.sh`, `smoke.ps1` | Nam | **READY** | — | §18: 35 checks per script, exit 0; non-zero exit on any failure | — |
 | `Makefile` | Nam | **READY** (partly) | — | run through `make`: `help`, `config`, `smoke`, `check-java` (refuses JDK 17, accepts 21). `test`, `up`, `integration`, `reset` not run through `make` (the commands behind them were run directly) | — |
 
@@ -94,7 +94,7 @@ Canonical vocabulary (used by the module matrix, TRACEABILITY and `web-frontend/
 H1 adds `GET /api/v1/attendance/events` as an explicit **dev-profile-only** path exception; H2 adds
 `POST /api/dev/kiosk/whitelist/sync`. Both are unauthenticated, synthetic-data-only (B29).
 
-`/api/dev/attendance/*`, `/api/dev/kiosk/*` and `/api/dev/reports/*` (profile `dev`, unauthenticated) · the three matching `location` blocks in `nginx-gateway/nginx.conf` · `REPORTING_INCLUDE_DEV_FIXTURES=true` in Compose (reports and the HR export count fixture rows, B26) · `QueueSyntheticEventUseCase` (synthetic events, no QR/TOTP) · column `attendance_events.dev_fixture` · `mock-turnstile-api`, `mock-hr-payroll-api` · password `dev-only-change-me` · `HEALTH_SHOW_DETAILS=always` · `kiosk.central.sync-path=/api/dev/attendance/sync`. · `web-frontend` `/demo` (calls the dev routes above; uses the synthetic employees EMP001–EMP004)
+`/api/dev/attendance/*`, `/api/dev/kiosk/*`, `/api/dev/reports/*` and `POST /api/local/scan` (profile `dev`, unauthenticated) · the three matching `location` blocks in `nginx-gateway/nginx.conf` · `REPORTING_INCLUDE_DEV_FIXTURES=true` in Compose (reports and the HR export count fixture rows, B26) · `QueueSyntheticEventUseCase` (synthetic events, no QR/TOTP) · column `attendance_events.dev_fixture` · `mock-turnstile-api`, `mock-hr-payroll-api` · password `dev-only-change-me` · `HEALTH_SHOW_DETAILS=always` · `kiosk.central.sync-path=/api/dev/attendance/sync`. · `web-frontend` `/demo` (calls the dev routes above; uses the synthetic employees EMP001–EMP004)
 
 User/QR dev-only inventory (B21/B22): `/api/v1/qr/{employeeId}` and lifecycle/audit routes,
 `/api/v1/kiosk/whitelist` with a dummy kiosk key in Compose, public dummy seed QR secrets,
@@ -546,3 +546,61 @@ scripts; `.env.example`, `docker-compose.yml`, `application.yml` (comment only);
 Final checks: `node scripts/check-docs.mjs` exit 0 (30 Markdown files, 355 links, zero warnings),
 `git diff --check` exit 0. Branch/HEAD remain `feat/kiosk-whitelist-sync` / `ee88e68`;
 `git diff --cached --quiet` exit 0 confirms no index changes. H3/H4 remain uncommitted.
+
+## 22. Dev QR scan (2026-11-18)
+
+Checkout local `codex/kiosk-qr-scan`, dựa trên `8a45d98` của `origin/feat/kiosk-whitelist-sync`.
+Kiosk chạy scan thật trong profile `dev` và giữ nhãn **DEV_SLICE**. SQLite ghi token và event trong một transaction
+trước khi gửi lệnh cổng. Sync vẫn dùng chính ID đó và cần ack theo từng ID.
+[B30](DECISIONS.md#bootstrap-decisions) ghi hành vi từ chối tạm thời và các owner cần review.
+
+Test Compose mới tại `tests/integration/main-flow.test.mjs` kiểm tra QR qua gateway, SQLite, mock turnstile,
+PostgreSQL, Central Events, báo cáo, revoke/rotate, replay, offline và 20 scan qua restart.
+Dev ingress phía central đánh dấu dữ liệu là fixture. Báo cáo dev trong Compose có thể đọc các fixture này.
+
+| Lệnh | Exit | Kết quả |
+|---|---:|---|
+| `mvn -B -ntp -pl kiosk-agent test` (JDK 21.0.6) | 0 | 408 test, 0 lỗi, 0 skip. Có ArchUnit, SQLite thật, và luồng QR offline → PENDING → SYNCED qua HTTP loopback với central stub. |
+| `node scripts/verify.mjs --fast` | 1 | Lượt Maven reactor ban đầu ghi nhận 13 skip, sau đó phải dừng Surefire đang chờ Docker. Frontend, mock, docs và Compose config pass. |
+| `mvn -B -ntp '-Dtest=*,!*PostgresIntegrationTest' -Dsurefire.failIfNoSpecifiedTests=false test` | 0 | 636 test chạy, 0 lỗi và 0 skip trong tập đã chọn; 4 lớp PostgreSQL Testcontainers bị loại khỏi lần chạy này. |
+| `node scripts/verify.mjs --only frontend,mocks,docs` | 0 | Typecheck/build frontend và 118 Vitest; mock turnstile 6, mock HR 11; docs check PASS. |
+| `docker compose config --quiet`, `node --check tests/integration/main-flow.test.mjs`, `git diff --check` | 0 / 0 / 0 | Kiểm tra cấu hình, cú pháp và diff. |
+| `wsl -d Ubuntu -- timeout 15s docker info --format '{{.ServerVersion}}'` | 124 | Socket Docker Desktop không trả lời. |
+
+Smoke qua gateway, integration Compose (gồm T02 20 scan và revoke sau refresh), browser acceptance và load
+test vẫn **NOT_RUN**. Ca T02 dựng trạng thái đã commit tại Central nhưng kiosk chưa nhận ack bằng một request
+độc lập. Chưa kiểm chứng việc làm rơi response thật trên đường truyền.
+Log cục bộ ở `.verify-logs/` (Git bỏ qua).
+
+## 23. M2 follow-up and Compose acceptance (2026-11-18)
+
+Compose project `tmc-priority-review`, separate ports and volumes. Docker Desktop CLI restart reported exit 1
+during shutdown. After the desktop backend restarted, Docker Engine 27.5.1 responded and the Compose project started.
+Environment: Windows host with Intel Core i5-1135G7 (4 cores, 8 logical processors), Docker VM with 8 CPUs and
+approximately 3.68 GiB RAM, JDK 21.0.6, PostgreSQL 16 and k6 2.4.0. Gate latency is for the mock.
+Changes to the scanner, UI and Reporting preserve the `DEV_SLICE` designation. B31–B33 require owner review.
+
+| Command / check | Exit | Observed result |
+|---|---:|---|
+| `docker compose config --quiet` and `docker compose up --build -d --wait --wait-timeout 240` | 0 / 0 | 10 healthy containers on the isolated project. |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1` and `bash scripts/smoke.sh` (Git Bash) | 0 / 0 | Both 35/35. Logs `priority-smoke.log` and `priority-smoke-bash.log`. |
+| `node scripts/verify.mjs --only integration` | 0 | 19/19, 0 skipped; includes T02 and gateway → scan → PostgreSQL → report. See `priority-integration.log` and `integration.log`. |
+| `mvn -B -ntp test`, then `mvn -B -ntp -fae test` on JDK 21.0.6 | 1 → 0 | Initial User/QR Testcontainers JDBC timeout. Retry after images were built: 680 passed, 0 skipped, including PostgreSQL Testcontainers. See `priority-java-full*.log`. |
+| `node scripts/verify.mjs --only frontend,mocks,docs` | 0 | Frontend 118 tests/typecheck/build, mocks 6 turnstile and 11 HR. |
+| Verifier prerequisite check with an intentionally missing Compose key | 1 expected | Compose config exit 15. Stack-up, smoke and integration report SKIPPED. See `priority-verifier-prerequisite.log`. |
+| Chrome headless via `priority-browser.mjs` | 0 | Revoke → refresh → prior QR returns `REJECTED/REVOKED`. Activate → refresh → new QR `ALLOWED/SENT`. Evidence `priority-demo-revoked.png` and `priority-demo-activated.png` with the QR image hidden. |
+| Read-only snapshot of Compose SQLite and scheduled-cutoff PostgreSQL query | 0 / 0 | All four rejection reasons persisted and SQLite integrity OK. A scheduled batch discovered after cutoff was FAILED, 0 sends, with deadline at 06:00 VN. See `priority-audit-sqlite-verified.log` and `priority-hr-cutoff.log`. |
+| T06 `node .verify-logs/priority-report-probe.mjs` | 0 | BD/date report over 35,200 synthetic events for 800 employees across 22 days, max-size page of 500 rows. First request 1,471 ms; 25 subsequent requests p50 753 ms, p95 1,877 ms, p99/max 2,694 ms. Shift and role checks remain outside this measured API. |
+| T01 k6 2.4.0 `quick`, first run and retry | 99 → 0 | First run overlapped Maven/Testcontainers and crossed latency and dropped-iteration thresholds. Isolated retry passed. Quick is a preflight; see the steady-run result for NFR-1. |
+| T01 k6 2.4.0 `steady`, BD, configured 800 scans / 30 min | 0 | 801 measured calls, 801 ALLOWED/SENT and within 2 s, zero HTTP errors and dropped iterations. p50 38.72 ms, p95 135.68 ms, p99 269.74 ms, max 1.84 s; 0.447 iterations/s. See `priority-k6-quiet-steady.log` and corresponding JSON. |
+| k6 2.4.0 `burst`, BD, configured 800 scans / 2 min | 0 | 801 measured calls, 801 ALLOWED/SENT, zero HTTP errors and drops. p50 35.92 ms, p95 60.89 ms, p99 152.07 ms, max 915.06 ms; 6.679 iterations/s. Stress result reported separately. |
+
+Raw local logs are under `.verify-logs/`. Compose T02 precommits one event through separate HTTP before the
+kiosk receives its acknowledgement. The earlier local kiosk run physically dropped the response against an in-memory
+Central stub. Both are scoped to the recorded conditions.
+
+The load runner used `docker run --rm --network tmc-priority-review_default -e SCENARIO=steady`, the recorded
+k6 2.4.0 image, script mount `tests/load/k6`, `KIOSK_URL=http://kiosk-agent:8080`,
+`GATEWAY_URL=http://nginx-gateway` and `k6 run --summary-export`. Build/test activity ended before the steady run.
+The PostgreSQL count for the steady time range was 802 events, 802 distinct attendance IDs and 802 distinct
+employees. This includes the setup probe. See `priority-steady-central-count.log`.

@@ -67,7 +67,9 @@ All existing fields, including the legacy `qrTokenPayload` string `employeeId:to
 `periodSeconds` is an int, always 30. The nested `qrPayload` has exactly four fields: `empId = employeeId`,
 six-digit String `totp = totpCode` (preserves leading zeroes), long `ts = issuedAt.getEpochSecond()`,
 int `ver = secretVersion`. The frontend draws this object as QR; `ts` is issue time, not the step counter.
-The DRAFT scan/version policy still needs Khoa–Khánh review; adding payload fields does not implement scanning.
+The dev kiosk implements scan/version validation in §3. Khoa and Khánh still need to review the DRAFT.
+The demo renderer consumes the server-issued, short-lived QR payload. See B32 for the pending clarification
+of the browser credential rule.
 Six-digit codes can collide; version/status checks are required in addition to TOTP.
 No shared secret is returned to the employee. Sensitive DTO `toString()` values are redacted.
 
@@ -103,7 +105,7 @@ Ordering is by sequence, not timestamp. Audit encoding and limitations: [DATA-MO
   "qrStatus":"ACTIVE", "secretVersion":1, "sharedSecret":"<SENSITIVE-REDACTED>", "updatedAt":"2026-11-14T00:00:00Z"}]
 ```
 
-## 3. POST /api/local/scan [TEAM-PLAN]
+## 3. POST /api/local/scan [TEAM-PLAN, DRAFT]
 
 Kiosk simulator → kiosk-agent, [DRAFT] input:
 
@@ -117,7 +119,24 @@ Response [DRAFT] for accepted:
 {"result":"ALLOWED", "attendanceId":"c5b0ff1a-2c59-4333-ac72-1b41b84e84a1", "gateCommand":"SENT", "processingTimeMs":25}
 ```
 
-Rejected attempts should be persistently auditable, with no OPEN command. A locally recorded `PENDING` attendance event does **not** mean central commit. For turnstile errors: preserve durable record and expose explicit `GATE_ERROR`/result; do not report gate physically opened if only a mock accepted command.
+The current implementation runs under profile `dev` and returns 501 outside that profile. A valid request requires
+`gateId`, direction `IN` or `OUT`, and all four QR fields. The kiosk checks the code against its own clock using
+the current and previous 30-second steps. `ts` is the QR issue time in epoch seconds.
+
+Both authorization outcomes return HTTP 200 with `X-TMC-Dev-Only: true`. An allowed scan commits the token and
+`PENDING` attendance row atomically, then sends the gate command. `gateCommand: FAILED` preserves the
+`ALLOWED` result and attendance ID. `SENT` means the mock accepted the request.
+
+```json
+{"result":"REJECTED","gateCommand":"NOT_ATTEMPTED","processingTimeMs":2,"reason":"REPLAYED"}
+```
+
+Other rejection reasons are `UNKNOWN_EMPLOYEE`, `REVOKED` and `INVALID_TOTP` (wrong or expired code,
+version mismatch or missing verification material). The kiosk writes the rejection to its local
+`rejected_scan_audit` table and excludes it from the attendance queue. Retention and central sync policy
+remain open under D06/B31. The public scan response shape is unchanged.
+Malformed input returns 400. Missing/unreadable whitelist or local storage failure returns 503 with
+`WHITELIST_UNAVAILABLE` or `STORAGE_UNAVAILABLE`. Errors use the standard correlation ID envelope.
 
 ## 4. POST /api/v1/attendance/events [BASELINE-M1 route]
 
@@ -264,7 +283,7 @@ Other proposals still need their owners' agreement. The page reports unimplement
 | `POST /api/v1/qr/{empId}/revoke` | Khoa | `{"reason":"…"}` → 200; `qr_status = REVOKED`; audit log entry |
 | `GET /api/v1/attendance/events?limit=20&employeeId=EMP001` | Khôi | H1, **dev profile only**: `{"events":[ §4 event … ]}`, newest first, fixtures included; details below |
 | `POST /api/dev/kiosk/whitelist/sync` | Khôi | H2, **dev profile only**: runs the existing shared `SyncWhitelistUseCase` once; only `UPDATED` / `NOT_NEWER` return 200; details below |
-| `POST /api/local/scan` response `reason` | Khánh | on `REJECTED`: `EXPIRED`, `INVALID_TOTP`, `REPLAYED`, `REVOKED`, `UNKNOWN_EMPLOYEE` |
+| `POST /api/local/scan` response `reason` | Khánh | on `REJECTED`: `INVALID_TOTP` (also covers expiry), `REPLAYED`, `REVOKED`, `UNKNOWN_EMPLOYEE`; see §3 and B30 |
 
 **Security:** the three QR routes are unauthenticated by request of the M2 brief ("demo"). Anyone who knows an
 employee id could obtain that employee's current code, which defeats ADR-02. Before any non-demo use they must

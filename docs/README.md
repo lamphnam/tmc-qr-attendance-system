@@ -34,6 +34,8 @@ Handoff documentation for **TMC QR Attendance & Access Control** (CO3017 Softwar
 | [TRACEABILITY](TRACEABILITY.md) | FR/NFR/ADR ↔ class ↔ test with status, and the Java class map |
 | [SOLID-GUIDELINES](SOLID-GUIDELINES.md) | Pragmatic SOLID: when to apply it, per-principle guidance, anti-patterns, defence questions, the SOLID evidence table |
 | [STATUS](STATUS.md) | module status labels, per-module status, commands run and results, dev-only inventory |
+| [M2-REVIEW](M2-REVIEW.md) | submission draft, architecture views, SOLID reflection and owner sign-off |
+| [M2-EVIDENCE](M2-EVIDENCE.md) | verified results, sanitized log excerpts and assets for slides |
 | [TODO](TODO.md) | remaining work per member |
 
 Editing rules: state a fact once and link to it elsewhere; never promote a [DRAFT] silently (record the decision in DECISIONS); when a module's real status changes update STATUS, TRACEABILITY and `web-frontend/src/catalog.ts` together. Language: reference docs are English, team-operational docs (README, AGENTS, STATUS, TODO) are Vietnamese; code identifiers and comments are English.

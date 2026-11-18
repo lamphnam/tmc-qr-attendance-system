@@ -19,7 +19,7 @@ What must be proven and what counts as done. Commands to run things: root [READM
 | Mocks | `node:test` | `mock-external-systems/*` |
 | Running stack | `scripts/smoke.sh` / `smoke.ps1` (health, DB/SQLite connectivity, routing, honest 501s) | `scripts/` |
 | Black-box slice / QR lifecycle | `slice.test.mjs` asserts on PostgreSQL rows, SQLite queue and turnstile commands; `user-qr.test.mjs` checks QR fields/payload/period, 409 revocation, scoped revision headers (including `[]`), validation and independent checksum verification | `tests/integration/` |
-| Load | k6 T01 script + 1000-employee fixture, NOT_RUN until the scan exists ([tests/load](../tests/load/README.md)) | `tests/load/` |
+| Load | k6 T01 script + 1000-employee fixture; BD steady and T06 results in [STATUS §23](STATUS.md#23-m2-follow-up-and-compose-acceptance-2026-11-18) | `tests/load/` |
 | All of the above + docs check, one honest report | `scripts/verify.mjs` (`--fast` without Docker); markdown links/anchors: `scripts/check-docs.mjs` | `scripts/` |
 
 ## Must-run by M2 [TEAM-PLAN]
@@ -86,10 +86,13 @@ Checked boxes are verified on 2026-11-01 (commands and exit codes in [STATUS](ST
 
 ### C. Full M2 (owners, later)
 - [ ] FR/NFR traceability covers every promised feature; every unimplemented one is explicit ([TRACEABILITY](TRACEABILITY.md)).
-- [ ] Dynamic QR (RFC 6238, HMAC-SHA256, step window, anti-replay) with audit tests.
-- [ ] Offline 20 unique events, none lost or duplicated, restart recovery (T02).
+- [x] Dev dynamic QR with TOTP/replay tests, SQLite rejection audit and User/QR lifecycle audit verification.
+- [x] T02 in Compose: 20 unique real scans survived restart and reached PostgreSQL once per ID.
+- Deployed QR, rejection, and 20-scan cases are in `tests/integration/main-flow.test.mjs`. The restart case stops
+  Attendance Processor across the kiosk restart, then commits one event centrally before releasing kiosk sync to
+  exercise recovery from a central commit without a kiosk ack. See [verification](STATUS.md#22-dev-qr-scan-2026-11-18).
 - [ ] Guarded manual open with an audit record (T04).
-- [ ] QR revoked after a whitelist sync; offline limitations disclosed (T03).
+- [x] T03 in Compose: prior QR denied after revocation and whitelist refresh; activation checked in Chrome. Offline revocation limits remain documented.
 - [x] HR export: schedule + retry + stable idempotency + manual trigger + alert (T05) — dev slice only: unauthenticated `/api/dev/reports/*`, the alert is a log line ([DECISIONS B24–B26](DECISIONS.md#bootstrap-decisions)). Evidence: `HrExportServiceTest` (fake clock: 01:00 boundary, backoff, give-up at 06:00, catch-up, lease), `ReportingPostgresIntegrationTest`, `tests/integration/reporting.test.mjs` (real mock HR).
-- [ ] Load test with p95/p99 measured under the official workload (T01, T06).
+- [x] Load timings recorded for T01 BD steady and T06 BD/date report. Documented scope excludes physical gate, report shifts and role checks.
 - [ ] M2 views (Module / C&C / Allocation), SOLID evidence in real code, reflection, GitHub URL.
