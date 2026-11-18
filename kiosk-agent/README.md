@@ -2,9 +2,11 @@
 
 Owner: **Khánh** · package `vn.edu.hcmut.tmc.kiosk` · port 8080 (host 8085) · gateway `/api/local/**`, `/api/dev/kiosk/**`. Status context: [docs/STATUS.md](../docs/STATUS.md) · remaining work: [docs/TODO.md](../docs/TODO.md#2-khánh--kiosk-agent-mock-turnstile-api-sqlite-syncmanager) · class status: [docs/TRACEABILITY.md](../docs/TRACEABILITY.md#kiosk-agent-khánh).
 
-Offline-first edge agent. The **durable SQLite queue and the store-and-forward sync are real and tested**; the **actual QR scan (TOTP, whitelist, anti-replay) is not implemented**, so `POST /api/local/scan` answers `501`.
+Offline-first edge agent. In the dev profile, a real QR scan validates the cached whitelist and TOTP locally,
+atomically consumes the matched step and queues the attendance event, then calls the mock turnstile.
 
-The local whitelist domain and SQLite snapshot store are implemented, including AES-256-GCM protection of non-null verification material (D08). HTTP → use case → SQLite and periodic whitelist sync are implemented behind a flag defaulting to false, tested with mock Central. Real Central revision and scan/TOTP integration remain unverified/unimplemented respectively. The label remains DEV_SLICE.
+The local whitelist domain and SQLite snapshot store protect verification material with AES-256-GCM (D08).
+The dev scan and its rejection and error responses are documented in [API-CONTRACTS §3](../docs/API-CONTRACTS.md#3-post-apilocalscan-team-plan-draft).
 
 `SyncWhitelistUseCase`, the HTTP source and its lifecycle scheduler are singleton beans only when `KIOSK_WHITELIST_SYNC_ENABLED=true`. The standalone/example default stays false; dev Compose explicitly enables it and requires a local AES key. Dev queues a ready-time pass; other profiles keep the full first delay. See [H3/H4](#dev-initial-sync-and-key-provisioning-h3h4).
 
@@ -12,7 +14,7 @@ The local whitelist domain and SQLite snapshot store are implemented, including 
 
 | Route | Status |
 |---|---|
-| `POST /api/local/scan` | **NOT_IMPLEMENTED** (501). Never returns ALLOWED. Implementation brief: [handoff](#handoff-qr-scan-for-khánh-2026-11-16) |
+| `POST /api/local/scan` | **DEV_SLICE**. 200 for ALLOWED/REJECTED, 400 for invalid input, 503 for local cache/storage failure. Outside `dev`: 501. |
 | `POST /api/dev/kiosk/synthetic-event` | **DEV-ONLY**. Synthetic event with **no QR/TOTP check**: commit PENDING to SQLite, *then* call the local turnstile |
 | `GET /api/dev/kiosk/queue` | **DEV-ONLY** counts + recent rows read from SQLite |
 | `POST /api/dev/kiosk/sync/run` | **DEV-ONLY** one sync pass now (a scheduler also runs every 5 s) |
@@ -22,6 +24,7 @@ The local whitelist domain and SQLite snapshot store are implemented, including 
 
 ## What the slice guarantees
 - **Order (ADR-01):** the event is committed to SQLite as `PENDING` *before* the open command is sent; a test proves the row is visible from a fresh connection at the moment the turnstile is called.
+- **Local QR verification (ADR-02):** check the active cached employee and version, accept either of the last two adjacent 30-second steps (current and previous), and use `(employee_id, matched_time_step)` as the on-disk replay key. The dev kiosk persists business rejections in the local SQLite audit table. Retention and Central replication remain open under D06.
 - **Sync status ≠ gate status.** `sync_status` (`PENDING|SYNCED|FAILED`) is central synchronisation only; `gate_command_status` (`SENT|FAILED|…`) is whether the command was accepted. `SENT` against the mock proves nothing physical.
 - **SYNCED only after an ack naming the id.** Unacknowledged ids stay `PENDING` with exponential backoff; a whole-request failure (refused, timeout, 4xx, 5xx) is never a rejection — only a per-event `REJECTED_PERMANENT` makes a row `FAILED` (DECISIONS B07).
 - **Durability scope:** WAL + `synchronous=FULL` cover a process crash or restart, not a disk failure ([limitations](../docs/DECISIONS.md#known-limitations)). Use the named volume, not a Windows bind mount (B17).
@@ -227,6 +230,8 @@ Focused script checks: `powershell -NoProfile -ExecutionPolicy Bypass -File scri
 These generate random test keys only under ignored `kiosk-agent/target/` and print counts, never key values.
 
 ## Handoff: QR scan for Khánh (2026-11-16)
+
+Historical implementation brief. Current behavior is described above and in API-CONTRACTS §3.
 
 Written by Nam from the merged `develop` (`d486668`) so the scan can be built tonight without re-reading every branch. It describes what exists and what the other modules expect; the design choices marked **proposal** are yours to change (tell Khiêm if the wire shape changes, and record contract changes with the `record-decision` skill).
 

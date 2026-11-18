@@ -13,6 +13,10 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -26,23 +30,34 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.web.servlet.MockMvc;
+
+import vn.edu.hcmut.tmc.kiosk.domain.model.QrStatus;
+import vn.edu.hcmut.tmc.kiosk.domain.model.WhitelistEmployee;
+import vn.edu.hcmut.tmc.kiosk.domain.model.WhitelistMetadata;
+import vn.edu.hcmut.tmc.kiosk.domain.model.WhitelistSnapshot;
+import vn.edu.hcmut.tmc.kiosk.domain.port.IWhitelistSnapshotStore;
+import vn.edu.hcmut.tmc.kiosk.presentation.dto.QrScanRequestDto;
 
 /**
  * Whole kiosk in one JVM: real Spring wiring, real SQLite file, real HTTP to a local stand-in for the mock turnstile
  * and for central. Walks the offline -> PENDING -> reconnect -> SYNCED story through the dev endpoints.
  */
 @SpringBootTest(properties = {"kiosk.sync.enabled=false", "management.endpoint.health.show-details=always"})
-@AutoConfigureMockMvc
+@AutoConfigureMockMvc(print = MockMvcPrint.NONE)
 @ActiveProfiles("dev")
 class KioskAgentApplicationTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final Instant SCAN_TIME = Instant.ofEpochSecond(59_830_000L * 30);
     private static final AtomicInteger turnstileCommands = new AtomicInteger();
     private static final List<String> centralRequests = new CopyOnWriteArrayList<>();
     private static final HttpServer STUB;
@@ -86,6 +101,7 @@ class KioskAgentApplicationTest {
         registry.add("kiosk.sqlite.path", () -> DB_DIR.resolve("kiosk.db").toString());
         registry.add("kiosk.central.base-url", () -> stubUrl);
         registry.add("kiosk.turnstile.base-url", () -> stubUrl);
+        registry.add("kiosk.whitelist.secret-key-base64", () -> Base64.getEncoder().encodeToString(new byte[32]));
     }
 
     @AfterAll
@@ -95,6 +111,19 @@ class KioskAgentApplicationTest {
 
     @Autowired
     MockMvc mvc;
+
+    @Autowired
+    IWhitelistSnapshotStore whitelist;
+
+    @Autowired
+    JdbcTemplate jdbc;
+
+    @TestBean
+    Clock clock;
+
+    static Clock clock() {
+        return Clock.fixed(SCAN_TIME, ZoneOffset.UTC);
+    }
 
     @BeforeEach
     void backOnline() throws Exception {
@@ -135,14 +164,72 @@ class KioskAgentApplicationTest {
     }
 
     @Test
-    void theRealScanEndpointAnswersNotImplementedAndNeverEchoesTheTotp() throws Exception {
+    void scanWithoutAnInitializedCacheFailsClosedAndNeverEchoesTheTotp() throws Exception {
+        int commandsBefore = turnstileCommands.get();
         String response = mvc.perform(post("/api/local/scan").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"gateId\":\"BD-G01\",\"direction\":\"IN\",\"qrPayload\":{\"empId\":\"EMP001\",\"totp\":\"482910\",\"ts\":1761152000,\"ver\":1}}"))
-                .andExpect(status().isNotImplemented())
-                .andExpect(jsonPath("$.code").value("NOT_IMPLEMENTED"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("WHITELIST_UNAVAILABLE"))
+                .andExpect(jsonPath("$.correlationId").isNotEmpty())
                 .andReturn().getResponse().getContentAsString();
 
         assertThat(response).doesNotContain("482910");
+        assertThat(turnstileCommands.get()).isEqualTo(commandsBefore);
+    }
+
+    @Test
+    void missingScanFieldsAreRejectedBeforeLookup() throws Exception {
+        mvc.perform(post("/api/local/scan").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        assertThat(new QrScanRequestDto.QrPayload(
+                "fixture", "482910", 0L, 1).toString()).doesNotContain("482910");
+    }
+
+    @Test
+    void realQrScanWorksWhileOfflineAndSyncsItsIdAfterReconnect() throws Exception {
+        var employee = new WhitelistEmployee("EMP-QR-TEST", QrStatus.ACTIVE, 1,
+                "TMC_LOAD_BD_1000_V1".getBytes(StandardCharsets.UTF_8));
+        assertThat(whitelist.replaceIfNewer(new WhitelistSnapshot(
+                new WhitelistMetadata("BD-K01", "BD", 1, SCAN_TIME, 1), List.of(employee)))).isTrue();
+        try {
+            mvc.perform(put("/api/dev/kiosk/sync/offline").contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"disabled\":true}"))
+                    .andExpect(status().isOk());
+            int commandsBefore = turnstileCommands.get();
+            int requestsBefore = centralRequests.size();
+            var request = post("/api/local/scan").contentType(MediaType.APPLICATION_JSON).content("""
+                    {"gateId":"BD-G01","direction":"IN","qrPayload":{"empId":"EMP-QR-TEST","totp":"727791","ts":0,"ver":1}}
+                    """);
+            String body = mvc.perform(request).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.result").value("ALLOWED"))
+                    .andExpect(jsonPath("$.gateCommand").value("SENT"))
+                    .andReturn().getResponse().getContentAsString();
+            String id = JSON.readTree(body).get("attendanceId").asText();
+            assertThat(syncStatusOf(id)).isEqualTo("PENDING");
+
+            mvc.perform(request).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.result").value("REJECTED"))
+                    .andExpect(jsonPath("$.reason").value("REPLAYED"));
+            assertThat(turnstileCommands.get()).isEqualTo(commandsBefore + 1);
+            assertThat(centralRequests).hasSize(requestsBefore);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM used_tokens WHERE employee_id = ?", Integer.class,
+                    employee.employeeId())).isEqualTo(1);
+
+            backOnline();
+            mvc.perform(post("/api/dev/kiosk/sync/run")).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.synced").value(1));
+            assertThat(syncStatusOf(id)).isEqualTo("SYNCED");
+            assertThat(centralRequests).hasSize(requestsBefore + 1);
+            assertThat(JSON.readTree(centralRequests.get(requestsBefore)).get("events").get(0)
+                    .get("attendanceId").asText()).isEqualTo(id);
+        } finally {
+            backOnline();
+            jdbc.update("DELETE FROM whitelist_cache");
+            jdbc.update("DELETE FROM kiosk_metadata");
+            jdbc.update("DELETE FROM local_attendance_events WHERE employee_id = ?", employee.employeeId());
+            jdbc.update("DELETE FROM used_tokens WHERE employee_id = ?", employee.employeeId());
+        }
     }
 
     @Test

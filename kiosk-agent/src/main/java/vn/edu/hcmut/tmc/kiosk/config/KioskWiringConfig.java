@@ -11,7 +11,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import vn.edu.hcmut.tmc.kiosk.application.usecase.CentralSyncSwitch;
 import vn.edu.hcmut.tmc.kiosk.application.usecase.SyncSettings;
 import vn.edu.hcmut.tmc.kiosk.domain.model.KioskIdentity;
+import vn.edu.hcmut.tmc.kiosk.domain.port.IHmacSha256;
 import vn.edu.hcmut.tmc.kiosk.domain.service.RetryBackoffPolicy;
+import vn.edu.hcmut.tmc.kiosk.domain.service.TotpValidatorDomainService;
 
 /**
  * Composition root. Lives outside the four layers on purpose: it is the one place allowed to know about
@@ -25,6 +27,11 @@ public class KioskWiringConfig {
     @Bean
     Clock clock() {
         return Clock.systemUTC();
+    }
+
+    @Bean
+    TotpValidatorDomainService totpValidator(Clock clock, IHmacSha256 hmac) {
+        return new TotpValidatorDomainService(clock, hmac);
     }
 
     @Bean
