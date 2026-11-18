@@ -71,12 +71,24 @@ public class HrExportService {
     public List<HrExportResult> runDueWork() {
         Instant now = clock.instant();
         ExportPeriod due = schedule.periodDueAt(now);
-        store.createIfAbsent(HrExportBatch.newBatch(due, TriggerSource.SCHEDULED, now, retryPolicy.deadlineFor(now)),
+        store.createIfAbsent(HrExportBatch.newBatch(due, TriggerSource.SCHEDULED, now, scheduledDeadline(due)),
                 new PayrollSelection(due, scope));
 
         List<HrExportResult> results = new ArrayList<>();
         for (HrExportBatch batch : store.findDue(now, settings.dueBatchLimit())) {
-            results.add(attempt(batch));
+            Instant attemptTime = clock.instant();
+            Instant deadline = effectiveDeadline(batch);
+            if (attemptTime.isAfter(deadline)) {
+                HrExportBatch expired = batch.expire(attemptTime);
+                if (store.compareAndSet(batch, expired)) {
+                    raiseAlert(expired, attemptTime);
+                    results.add(HrExportResult.afterAttempt(expired, null));
+                } else {
+                    results.add(HrExportResult.inProgress(batch));
+                }
+            } else {
+                results.add(attempt(batch, deadline, attemptTime));
+            }
         }
         return results;
     }
@@ -118,7 +130,23 @@ public class HrExportService {
     }
 
     private HrExportResult attempt(HrExportBatch batch) {
-        HrExportBatch claimed = batch.startAttempt(clock.instant(), settings.attemptLease());
+        return attempt(batch, effectiveDeadline(batch), clock.instant());
+    }
+
+    private Instant scheduledDeadline(ExportPeriod period) {
+        return retryPolicy.deadlineFor(schedule.scheduledAt(period));
+    }
+
+    private Instant effectiveDeadline(HrExportBatch batch) {
+        if (batch.triggerSource() == TriggerSource.SCHEDULED) {
+            Instant scheduled = scheduledDeadline(batch.period());
+            return scheduled.isBefore(batch.retryDeadline()) ? scheduled : batch.retryDeadline();
+        }
+        return batch.retryDeadline();
+    }
+
+    private HrExportResult attempt(HrExportBatch batch, Instant deadline, Instant startedAt) {
+        HrExportBatch claimed = batch.startAttempt(startedAt, settings.attemptLease());
         if (!store.compareAndSet(batch, claimed)) {
             return HrExportResult.inProgress(batch);
         }
@@ -128,7 +156,7 @@ public class HrExportService {
         HrExportBatch next = switch (delivery.outcome()) {
             case ACKNOWLEDGED -> claimed.acknowledged();
             case DELIVERED -> claimed.sent();
-            case RETRYABLE -> retryPolicy.nextAttemptAfter(claimed.attemptCount(), finishedAt, claimed.retryDeadline())
+            case RETRYABLE -> retryPolicy.nextAttemptAfter(claimed.attemptCount(), finishedAt, deadline)
                     .map(at -> claimed.retryAt(at, delivery.detail()))
                     .orElseGet(() -> claimed.failed("retry deadline passed; last error: " + delivery.detail()));
             case REJECTED -> claimed.failed("rejected by the receiver: " + delivery.detail());

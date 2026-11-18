@@ -86,6 +86,15 @@ public record HrExportBatch(
         return finish(BatchStatus.FAILED, null, error);
     }
 
+    /** Expires a waiting batch or abandoned attempt without creating another send attempt. */
+    public HrExportBatch expire(Instant now) {
+        if (!isDueAt(now)) {
+            throw new IllegalStateException("only a due batch can expire");
+        }
+        return new HrExportBatch(batchUuid, period, BatchStatus.FAILED, triggerSource, createdAt, retryDeadline,
+                attemptCount, lastAttemptAt, null, "retry deadline passed without a confirmed delivery", itemCount);
+    }
+
     /** A person asked to try a FAILED batch again: same id, same frozen items, a fresh retry window. */
     public HrExportBatch rearm(Instant now, Instant newDeadline, TriggerSource source) {
         if (status != BatchStatus.FAILED) {
