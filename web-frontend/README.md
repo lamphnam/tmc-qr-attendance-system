@@ -8,13 +8,13 @@ Real: the **Status** page (live `/services/<name>/health` through the gateway, e
 
 A standalone page (outside the scaffold shell) with three columns so the whole flow is visible at once:
 
-1. **Employee** — pick EMP001–EMP004, show the current code as a **QR image** (the TOTP digits are never printed), countdown to the next code, rotate secret, revoke QR.
+1. **Employee** — pick EMP001–EMP004, show the current code as a **QR image**, count down to the next code and rotate, revoke or activate. After revoke, refresh the kiosk whitelist and use the short-lived prior QR to check the kiosk denial.
 2. **Kiosk BD-K01** — scan the current code into gate BD-G01/BD-G02, authorization result shown separately from the gate-command status, offline switch, sync now, whitelist sync, synthetic event, SQLite queue.
 3. **Central** — which queued ids are in PostgreSQL, and a resend of SYNCED rows that must answer `ALREADY_EXISTS`.
 
-| Works against the real stack today | Waits for an owner (page shows the real 404/405/501) |
+| Implemented backend routes (verification in STATUS) | Remaining integration work |
 |---|---|
-| offline switch, sync, queue, synthetic event (`/api/dev/kiosk/*`), per-id lookup and resend (`/api/dev/attendance/*`) | QR, rotate, revoke, central list, whitelist sync: proposals in [API-CONTRACTS §8](../docs/API-CONTRACTS.md#8-demo-main-flow-routes-proposal-khiêm--khoa--khôi--khánh-not-agreed); `POST /api/local/scan` answers 501 |
+| User/QR lifecycle, H1 dev Central list, H2 dev whitelist refresh, local QR scan, offline switch, queue and resend ([API-CONTRACTS](../docs/API-CONTRACTS.md)) | Dev Main Flow and browser revoke/activate evidence in [STATUS §23](../docs/STATUS.md#23-m2-follow-up-and-compose-acceptance-2026-11-18). Owner review and the production auth contract remain open. |
 
 It relies on `/api/dev/**`, so it only works with the `dev` profile (Compose default) and uses synthetic data.
 

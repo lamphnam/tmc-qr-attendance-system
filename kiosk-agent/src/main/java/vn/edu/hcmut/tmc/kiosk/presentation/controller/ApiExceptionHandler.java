@@ -1,13 +1,16 @@
 package vn.edu.hcmut.tmc.kiosk.presentation.controller;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.transaction.TransactionException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 
 import vn.edu.hcmut.tmc.kiosk.presentation.dto.ErrorResponseDto;
+import vn.edu.hcmut.tmc.kiosk.domain.exception.WhitelistCacheException;
 
 /** Maps failures to the shared error shape. Never echoes request bodies (they may carry QR / TOTP data). */
 @RestControllerAdvice
@@ -21,6 +24,16 @@ public class ApiExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     ResponseEntity<ErrorResponseDto> invalid(IllegalArgumentException e, WebRequest request) {
         return error(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", e.getMessage(), request);
+    }
+
+    @ExceptionHandler(WhitelistCacheException.class)
+    ResponseEntity<ErrorResponseDto> whitelistUnavailable(WebRequest request) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "WHITELIST_UNAVAILABLE", "whitelist cache unavailable", request);
+    }
+
+    @ExceptionHandler({DataAccessException.class, TransactionException.class})
+    ResponseEntity<ErrorResponseDto> storageUnavailable(WebRequest request) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "STORAGE_UNAVAILABLE", "local storage unavailable", request);
     }
 
     private static ResponseEntity<ErrorResponseDto> error(HttpStatus status, String code, String message, WebRequest request) {

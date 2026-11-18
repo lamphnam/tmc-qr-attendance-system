@@ -102,11 +102,38 @@ class HrExportServiceTest {
 
     @Test
     void aRunMissedWhileTheServiceWasDownIsCaughtUpByTheNextPoll() {
-        clock.set(Instant.parse("2026-11-03T02:00:00Z")); // service back on 3 November
+        clock.set(RUN_AT.plus(Duration.ofHours(2)));
 
         service.runDueWork();
 
         assertThat(sent).singleElement().extracting(PayrollBatch::period).isEqualTo(OCTOBER);
+    }
+
+    @Test
+    void restartingAfterTheScheduledDeadlineFailsAndAlertsWithoutSending() {
+        clock.set(RUN_AT.plus(Duration.ofHours(7)));
+
+        HrExportResult result = service.runDueWork().get(0);
+
+        assertThat(result.outcome()).isEqualTo(Outcome.FAILED);
+        assertThat(result.batch().retryDeadline()).isEqualTo(RUN_AT.plus(Duration.ofHours(5)));
+        assertThat(result.batch().attemptCount()).isZero();
+        assertThat(sent).isEmpty();
+        assertThat(alerts).hasSize(1);
+        assertThat(service.triggerManually(OCTOBER).outcome()).isEqualTo(Outcome.DELIVERED);
+        assertThat(sent).hasSize(1);
+    }
+
+    @Test
+    void aQueuedRetryOverdueAfterRestartDoesNotSend() {
+        script.add(DeliveryResult.retryable("HTTP 503"));
+        service.runDueWork();
+        clock.set(RUN_AT.plus(Duration.ofHours(7)));
+
+        assertThat(service.runDueWork()).singleElement().extracting(HrExportResult::outcome)
+                .isEqualTo(Outcome.FAILED);
+        assertThat(sent).hasSize(1);
+        assertThat(alerts).hasSize(1);
     }
 
     @Test

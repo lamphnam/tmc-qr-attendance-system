@@ -6,6 +6,9 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -18,6 +21,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Arrays;
@@ -28,6 +32,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.sql.DataSource;
 
@@ -41,6 +46,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
@@ -48,6 +55,8 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DelegatingDataSource;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.client.RestClient;
 
 import vn.edu.hcmut.tmc.kiosk.KioskAgentApplication;
@@ -66,6 +75,7 @@ import vn.edu.hcmut.tmc.kiosk.infrastructure.persistence.SQLiteWhitelistReposito
 import vn.edu.hcmut.tmc.kiosk.infrastructure.persistence.SqliteConfig;
 import vn.edu.hcmut.tmc.kiosk.infrastructure.security.WhitelistSecretCodec;
 import vn.edu.hcmut.tmc.kiosk.infrastructure.sync.RestWhitelistSnapshotSource;
+import vn.edu.hcmut.tmc.kiosk.presentation.controller.DevWhitelistSyncController;
 
 /** Real Spring composition, SQLite and AES; only Central HTTP is mocked. All triggers are explicit test calls. */
 @ExtendWith(OutputCaptureExtension.class)
@@ -433,6 +443,125 @@ class WhitelistHttpSyncWiringTest {
                     }
                     assertThat(application.getBean(SQLiteWhitelistRepository.class).inspect()).isEmpty();
                 });
+    }
+
+    @Test
+    void manualHttpTriggerUsesTheSharedGuardAndCommitsThroughTheRealPipeline() {
+        seedOld();
+        var mvcRef = new AtomicReference<MockMvc>();
+        http.expect(requestTo(URL)).andRespond(request -> {
+            assertThat(transactions).hasValue(0);
+            try {
+                mvcRef.get().perform(post("/api/dev/kiosk/whitelist/sync"))
+                        .andExpect(status().isConflict())
+                        .andExpect(jsonPath("$.code").value("WHITELIST_SYNC_IN_PROGRESS"));
+            } catch (Exception failure) {
+                throw new java.io.IOException("manual trigger test failed", failure);
+            }
+            return withSuccess(employees(), MediaType.APPLICATION_JSON).header("X-Whitelist-Version", "5")
+                    .createResponse(request);
+        });
+        context.withUserConfiguration(DevWhitelistSyncController.class)
+                .withPropertyValues("spring.profiles.active=dev").run(application -> {
+                    assertThat(application).hasSingleBean(SyncWhitelistUseCase.class);
+                    var mvc = MockMvcBuilders
+                            .standaloneSetup(application.getBean(DevWhitelistSyncController.class)).build();
+                    mvcRef.set(mvc);
+                    mvc.perform(post("/api/dev/kiosk/whitelist/sync"))
+                            .andExpect(status().isOk())
+                            .andExpect(jsonPath("$.status").value("UPDATED"))
+                            .andExpect(jsonPath("$.snapshotVersion").value(5));
+                    assertThat(stored.inspect().orElseThrow().version()).isEqualTo(5);
+                    assertThat(stored.lookup("NEW").employee()).isPresent();
+                    centralSync.setDisabled(true);
+                    mvc.perform(post("/api/dev/kiosk/whitelist/sync"))
+                            .andExpect(status().isConflict())
+                            .andExpect(jsonPath("$.code").value("CENTRAL_SYNC_DISABLED"));
+                    assertThat(stored.inspect().orElseThrow().version()).isEqualTo(5);
+                });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"503", "missing-header"})
+    void devReadyFailureKeepsStartupAliveAndPeriodicRetryCommits(String failure) {
+        seedOld();
+        CountDownLatch first = new CountDownLatch(1);
+        CountDownLatch committed = new CountDownLatch(1);
+        afterCommit = committed::countDown;
+        http.expect(requestTo(URL)).andRespond(request -> {
+            first.countDown();
+            return (failure.equals("503") ? withStatus(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE)
+                    : withSuccess(employees(), MediaType.APPLICATION_JSON)).createResponse(request);
+        });
+        expectSnapshot(employees(), "5");
+        context.withPropertyValues("spring.profiles.active=dev", "kiosk.whitelist.sync-interval-ms=1000")
+                .run(application -> {
+                    assertThat(application).hasNotFailed();
+                    assertThat(first.getCount()).isEqualTo(1);
+                    assertThat(application.getBean(vn.edu.hcmut.tmc.kiosk.application.usecase.WhitelistSyncScheduler.class)
+                            .isRunning()).isFalse();
+                    application.publishEvent(new ApplicationReadyEvent(new SpringApplication(), new String[0],
+                            application.getSourceApplicationContext(), Duration.ZERO));
+                    assertThat(first.await(5, TimeUnit.SECONDS)).isTrue();
+                    assertOld();
+                    assertThat(committed.await(5, TimeUnit.SECONDS)).isTrue();
+                    assertThat(stored.inspect().orElseThrow().version()).isEqualTo(5);
+                    assertThat(stored.lookup("NEW").employee()).isPresent();
+                });
+    }
+
+    @Test
+    void devInitialFetchSharesManualGuardAndCannotOverlapThePeriodicWorker() {
+        seedOld();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch next = new CountDownLatch(1);
+        http.expect(requestTo(URL)).andRespond(request -> {
+            entered.countDown();
+            try {
+                await(release);
+            } catch (SQLException failure) {
+                throw new java.io.IOException("test coordination failed");
+            }
+            return withSuccess(employees(), MediaType.APPLICATION_JSON).header("X-Whitelist-Version", "5")
+                    .createResponse(request);
+        });
+        http.expect(requestTo(URL)).andRespond(request -> {
+            next.countDown();
+            return withSuccess(employees(), MediaType.APPLICATION_JSON).header("X-Whitelist-Version", "5")
+                    .createResponse(request);
+        });
+        context.withUserConfiguration(DevWhitelistSyncController.class)
+                .withPropertyValues("spring.profiles.active=dev", "kiosk.whitelist.sync-interval-ms=1000")
+                .run(application -> {
+                    var mvc = MockMvcBuilders.standaloneSetup(application.getBean(DevWhitelistSyncController.class)).build();
+                    application.publishEvent(new ApplicationReadyEvent(new SpringApplication(), new String[0],
+                            application.getSourceApplicationContext(), Duration.ZERO));
+                    try {
+                        assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                        mvc.perform(post("/api/dev/kiosk/whitelist/sync"))
+                                .andExpect(status().isConflict())
+                                .andExpect(jsonPath("$.code").value("WHITELIST_SYNC_IN_PROGRESS"));
+                        assertThat(next.await(1_200, TimeUnit.MILLISECONDS)).isFalse();
+                        assertOld();
+                    } finally {
+                        release.countDown();
+                    }
+                    assertThat(next.await(5, TimeUnit.SECONDS)).isTrue();
+                });
+        assertThat(stored.inspect().orElseThrow().version()).isEqualTo(5);
+    }
+
+    @Test
+    void offlineDevInitialPassDoesNotFetchOrWrite() {
+        seedOld();
+        centralSync.setDisabled(true);
+        context.withPropertyValues("spring.profiles.active=dev").run(application -> {
+            application.publishEvent(new ApplicationReadyEvent(new SpringApplication(), new String[0],
+                    application.getSourceApplicationContext(), Duration.ZERO));
+        });
+        assertOld();
+        assertThat(writeBegins).hasValue(0);
     }
 
     private DataSource observedDatabase() {

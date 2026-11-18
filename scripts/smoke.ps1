@@ -109,7 +109,7 @@ Expect 'gate       POST /api/v1/gates'                  POST "$Gateway/api/v1/ga
 Expect 'gate       GET  /api/v1/gates/BD-G01/status'    GET  "$Gateway/api/v1/gates/BD-G01/status"    501 '"code":"NOT_IMPLEMENTED"'
 Expect 'attendance POST /api/v1/attendance/events'      POST "$Gateway/api/v1/attendance/events"     501 '"code":"NOT_IMPLEMENTED"' '{}'
 Expect 'reporting  GET  /api/v1/reports/dashboard'      GET  "$Gateway/api/v1/reports/dashboard"      501 '"code":"NOT_IMPLEMENTED"'
-Expect 'kiosk      POST /api/local/scan (via gateway)'  POST "$Gateway/api/local/scan"                501 '"code":"NOT_IMPLEMENTED"' '{}'
+Expect 'kiosk      POST /api/local/scan (empty body object)' POST "$Gateway/api/local/scan"          400 '"code":"INVALID_REQUEST"' '{}'
 
 Write-Host '[5] gateway hygiene'
 Expect 'unknown /api path is a JSON 404 (and cannot loop)' GET "$Gateway/api/v1/nothing-here"     404 '"code":"NOT_FOUND"'

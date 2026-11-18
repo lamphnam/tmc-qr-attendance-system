@@ -7,24 +7,28 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import vn.edu.hcmut.tmc.kiosk.domain.model.Direction;
 import vn.edu.hcmut.tmc.kiosk.domain.model.GateCommandStatus;
 import vn.edu.hcmut.tmc.kiosk.domain.model.LocalAttendanceEvent;
 import vn.edu.hcmut.tmc.kiosk.domain.model.QueueCounts;
+import vn.edu.hcmut.tmc.kiosk.domain.model.RejectedScan;
 import vn.edu.hcmut.tmc.kiosk.domain.model.ScanResult;
 import vn.edu.hcmut.tmc.kiosk.domain.model.SyncStatus;
 import vn.edu.hcmut.tmc.kiosk.domain.port.IAttendanceLocalRepository;
 
 /**
- * SQLite adapter for the durable queue. Each statement is its own auto-committed transaction, so when
- * {@link #insertPending} returns the row is committed (WAL, synchronous=FULL - see {@link SqliteConfig}).
+ * SQLite adapter for the durable queue (WAL, synchronous=FULL - see {@link SqliteConfig}).
  *
  * <p>Timestamps are stored as fixed-width UTC text ({@code yyyy-MM-dd'T'HH:mm:ss.SSS'Z'}) so that string comparison
  * in SQL ({@code next_retry_at <= ?}) is also chronological comparison.
@@ -42,9 +46,38 @@ public class SQLiteAttendanceRepository implements IAttendanceLocalRepository {
     private static final RowMapper<LocalAttendanceEvent> ROW_MAPPER = SQLiteAttendanceRepository::mapRow;
 
     private final JdbcTemplate jdbc;
+    private final TransactionTemplate scanTransaction;
 
     public SQLiteAttendanceRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
+        this.scanTransaction = new TransactionTemplate(new JdbcTransactionManager(
+                Objects.requireNonNull(jdbc.getDataSource())));
+        this.scanTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
+    @Override
+    public boolean insertPendingWithToken(LocalAttendanceEvent event, long matchedTimeStep) {
+        return Boolean.TRUE.equals(scanTransaction.execute(status -> {
+            int inserted = jdbc.update("""
+                    INSERT INTO used_tokens (employee_id, matched_time_step, used_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (employee_id, matched_time_step) DO NOTHING""",
+                    event.employeeId(), matchedTimeStep, format(event.occurredAt()));
+            if (inserted == 0) {
+                return false;
+            }
+            insertPending(event);
+            return true;
+        }));
+    }
+
+    @Override
+    public void insertRejectedScan(RejectedScan scan) {
+        jdbc.update("""
+                INSERT INTO rejected_scan_audit (scan_id, employee_id, gate_id, direction, occurred_at, reason)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                scan.scanId().toString(), scan.employeeId(), scan.gateId(), scan.direction().name(),
+                format(scan.occurredAt()), scan.reason().name());
     }
 
     @Override

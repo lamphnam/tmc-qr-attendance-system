@@ -3,10 +3,10 @@
 --
 -- Status of each table:
 --   local_attendance_events  IMPLEMENTED by the dev slice (durable PENDING queue)
---   whitelist_cache          SCAFFOLD - owner Khanh/Khoa, secret-at-rest design open (D08)
---   used_tokens              SCAFFOLD - owner Khanh, anti-replay (ADR-02), must be written in the
---                            SAME transaction as the event row
---   kiosk_metadata           SCAFFOLD
+--   whitelist_cache          Versioned snapshots with encrypted verification material
+--   used_tokens              Local anti-replay (ADR-02), committed with each accepted scan event
+--   rejected_scan_audit      Local audit of QR denials; outside the attendance sync queue
+--   kiosk_metadata           Whitelist scope and snapshot revision
 
 CREATE TABLE IF NOT EXISTS local_attendance_events (
     attendance_id        TEXT    PRIMARY KEY,
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS whitelist_cache (
     employee_id        TEXT    PRIMARY KEY,
     qr_status          TEXT    NOT NULL,
     secret_version     INTEGER NOT NULL,
-    -- TODO(Khanh/Khoa, D08): protected at rest. Intentionally unused (NULL) in the bootstrap.
+    -- Versioned AES-GCM envelope, nullable when verification material is missing.
     shared_secret_enc  BLOB,
     cache_version      INTEGER NOT NULL,
     cached_at          TEXT    NOT NULL
@@ -52,4 +52,13 @@ CREATE TABLE IF NOT EXISTS used_tokens (
 CREATE TABLE IF NOT EXISTS kiosk_metadata (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rejected_scan_audit (
+    scan_id      TEXT PRIMARY KEY,
+    employee_id  TEXT NOT NULL,
+    gate_id      TEXT NOT NULL,
+    direction    TEXT NOT NULL CHECK (direction IN ('IN', 'OUT')),
+    occurred_at  TEXT NOT NULL,
+    reason       TEXT NOT NULL CHECK (reason IN ('UNKNOWN_EMPLOYEE', 'REVOKED', 'INVALID_TOTP', 'REPLAYED'))
 );

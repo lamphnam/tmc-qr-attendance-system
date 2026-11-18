@@ -28,12 +28,14 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import vn.edu.hcmut.tmc.attendance.domain.model.AttendanceHistoryPage;
 import vn.edu.hcmut.tmc.attendance.application.service.AttendanceHistoryService;
+import vn.edu.hcmut.tmc.attendance.application.service.AttendanceEventsService;
 import vn.edu.hcmut.tmc.attendance.domain.model.AttendanceHistoryQuery;
 import vn.edu.hcmut.tmc.attendance.domain.model.AttendanceRecord;
 import vn.edu.hcmut.tmc.attendance.domain.model.Direction;
 import vn.edu.hcmut.tmc.attendance.domain.model.ScanResult;
 import vn.edu.hcmut.tmc.attendance.infrastructure.persistence.PostgresAttendanceHistoryQuery;
 import vn.edu.hcmut.tmc.attendance.presentation.controller.DevAttendanceHistoryController;
+import vn.edu.hcmut.tmc.attendance.presentation.controller.DevAttendanceEventsController;
 
 /** Real PostgreSQL with the canonical schema; no H2 substitute and no duplicated DDL. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -239,5 +241,44 @@ class AttendanceHistoryPostgresIntegrationTest {
     private MockMvc historyMvc() {
         return MockMvcBuilders.standaloneSetup(
                 new DevAttendanceHistoryController(new AttendanceHistoryService(history))).build();
+    }
+
+    @Test
+    void devEventsListIncludesFixturesAndUsesNewestFirstWithStableIdsAndLimit() throws Exception {
+        insert(1, "EMP001", "BD", FROM, ScanResult.ALLOWED, false);
+        insert(2, "EMP002", "LA", FROM.plusSeconds(1), ScanResult.REJECTED, true);
+        insert(4, "EMP001", "BD", FROM.plusSeconds(2), ScanResult.ALLOWED, true);
+        insert(3, "EMP001", "BD", FROM.plusSeconds(2), ScanResult.ALLOWED, false);
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(new DevAttendanceEventsController(new AttendanceEventsService(history))).build();
+
+        mvc.perform(get("/api/v1/attendance/events").param("limit", "3"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.events.length()").value(3))
+                .andExpect(jsonPath("$.events[0].attendanceId").value(id(4).toString()))
+                .andExpect(jsonPath("$.events[1].attendanceId").value(id(3).toString()))
+                .andExpect(jsonPath("$.events[2].attendanceId").value(id(2).toString()))
+                .andExpect(jsonPath("$.events[2].factoryId").value("LA"))
+                .andExpect(jsonPath("$.events[2].scanResult").value("REJECTED"));
+        assertThat(history.findRecent(1, null)).extracting(AttendanceRecord::attendanceId).containsExactly(id(4));
+        // The old History capability still excludes the fixtures, in its original ascending order.
+        assertThat(page("EMP001", "BD", 0, 20).events()).extracting(AttendanceRecord::attendanceId)
+                .containsExactly(id(1), id(3));
+    }
+
+    @Test
+    void devEventsEmployeeFilterIsExactBoundAndAppliedBeforeLimit() throws Exception {
+        insert(1, "EMP001", "BD", FROM, ScanResult.ALLOWED, true);
+        insert(2, "EMP002", "BD", FROM.plusSeconds(1), ScanResult.ALLOWED, true);
+        insert(3, "EMP001", "LA", FROM.plusSeconds(2), ScanResult.REJECTED, false);
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(new DevAttendanceEventsController(new AttendanceEventsService(history))).build();
+
+        mvc.perform(get("/api/v1/attendance/events").param("employeeId", "EMP001").param("limit", "1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.events.length()").value(1))
+                .andExpect(jsonPath("$.events[0].attendanceId").value(id(3).toString()));
+        mvc.perform(get("/api/v1/attendance/events").param("employeeId", "UNKNOWN"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.events").isEmpty());
+        String literal = "x' OR '1'='1";
+        assertThat(history.findRecent(100, literal)).isEmpty();
+        insert(4, literal, "BD", FROM, ScanResult.ALLOWED, true);
+        assertThat(history.findRecent(100, literal)).extracting(AttendanceRecord::attendanceId).containsExactly(id(4));
     }
 }

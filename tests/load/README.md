@@ -1,12 +1,13 @@
-# tests/load — T01 script written, NOT_RUN
+# tests/load — kiosk workload and report probe
 
-Owner: Nam (with Khánh for the kiosk side). Nothing here has measured NFR-1 or NFR-7 yet. Workloads, thresholds and rules: [docs/TESTING.md](../../docs/TESTING.md) T01 and T06.
+Owner: Nam with Khánh for the kiosk side. Workloads and thresholds are in [TESTING](../../docs/TESTING.md).
+Read the measured scope and results in [STATUS §23](../../docs/STATUS.md#23-m2-follow-up-and-compose-acceptance-2026-11-18).
 
 Tool: **k6** (checked with k6 v1.7.1).
 
 | File | What it is | Status |
 |---|---|---|
-| `k6/peak-scan-load.js` | T01 / NFR-1: `POST /api/local/scan` on the kiosk, one fresh valid QR per scan | **NOT_RUN**: the scan answers 501 until Khánh's work is merged. `selftest` passed; `quick` on the live stack passed the fixture and TOTP checks, then aborted on the 501 as designed |
+| `k6/peak-scan-load.js` | T01 / NFR-1: `POST /api/local/scan` on the kiosk, one fresh valid QR per scan | BD steady: exit 0, 801 allowed, zero drops, p95 135.68 ms, p99 269.74 ms. |
 | `fixtures/load-employees.sql` | 1000 synthetic ACTIVE employees `LOAD-BD-0001..1000` for factory BD | Loaded on 2026-11-17 (1000 rows in 1.5 s, rerun inserts 0); whole audit chain re-verified ([STATUS §19](../../docs/STATUS.md#19-full-run-on-develop-with-docker-2026-11-17)) |
 | `k6/health-baseline.js` | Layout placeholder that only calls a health endpoint; says nothing about NFR-1 | NOT_TESTED |
 
@@ -44,7 +45,9 @@ The summary also reports:
 
 ## Run (Git Bash / WSL)
 
-The scans create real attendance rows (not `dev_fixture`) that reports and the HR export will count. Reset the database before and after.
+The scans execute the real dev QR authorization path. Central's dev ingress flags synced rows as
+`dev_fixture`; the Compose reporting flag can include them in reports and HR export. Use an isolated
+Compose project with fresh volumes for load runs.
 
 ```bash
 docker compose down -v

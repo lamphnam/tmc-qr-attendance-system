@@ -2,25 +2,29 @@
 
 Owner: **Khánh** · package `vn.edu.hcmut.tmc.kiosk` · port 8080 (host 8085) · gateway `/api/local/**`, `/api/dev/kiosk/**`. Status context: [docs/STATUS.md](../docs/STATUS.md) · remaining work: [docs/TODO.md](../docs/TODO.md#2-khánh--kiosk-agent-mock-turnstile-api-sqlite-syncmanager) · class status: [docs/TRACEABILITY.md](../docs/TRACEABILITY.md#kiosk-agent-khánh).
 
-Offline-first edge agent. The **durable SQLite queue and the store-and-forward sync are real and tested**; the **actual QR scan (TOTP, whitelist, anti-replay) is not implemented**, so `POST /api/local/scan` answers `501`.
+Offline-first edge agent. In the dev profile, a real QR scan validates the cached whitelist and TOTP locally,
+atomically consumes the matched step and queues the attendance event, then calls the mock turnstile.
 
-The local whitelist domain and SQLite snapshot store are implemented, including AES-256-GCM protection of non-null verification material (D08). HTTP → use case → SQLite and periodic whitelist sync are implemented behind a flag defaulting to false, tested with mock Central. Real Central revision and scan/TOTP integration remain unverified/unimplemented respectively. The label remains DEV_SLICE.
+The local whitelist domain and SQLite snapshot store protect verification material with AES-256-GCM (D08).
+The dev scan and its rejection and error responses are documented in [API-CONTRACTS §3](../docs/API-CONTRACTS.md#3-post-apilocalscan-team-plan-draft).
 
-`SyncWhitelistUseCase`, the HTTP source and its lifecycle scheduler are singleton beans only when `KIOSK_WHITELIST_SYNC_ENABLED=true`. The default is false in every profile; the first scheduled fetch waits a complete interval. See [whitelist scheduling](#whitelist-scheduling).
+`SyncWhitelistUseCase`, the HTTP source and its lifecycle scheduler are singleton beans only when `KIOSK_WHITELIST_SYNC_ENABLED=true`. The standalone/example default stays false; dev Compose explicitly enables it and requires a local AES key. Dev queues a ready-time pass; other profiles keep the full first delay. See [H3/H4](#dev-initial-sync-and-key-provisioning-h3h4).
 
 `WhitelistHttpTransport` implements HTTP fetching/validation of Central's employee array. It is an Infrastructure-only component, not an `IWhitelistSnapshotSource` implementation, and creates no trigger itself. After opt-in, scheduled or explicit use-case calls can persist valid snapshots. See [HTTP transport](#whitelist-http-transport-only).
 
 | Route | Status |
 |---|---|
-| `POST /api/local/scan` | **NOT_IMPLEMENTED** (501). Never returns ALLOWED. Implementation brief: [handoff](#handoff-qr-scan-for-khánh-2026-11-16) |
+| `POST /api/local/scan` | **DEV_SLICE**. 200 for ALLOWED/REJECTED, 400 for invalid input, 503 for local cache/storage failure. Outside `dev`: 501. |
 | `POST /api/dev/kiosk/synthetic-event` | **DEV-ONLY**. Synthetic event with **no QR/TOTP check**: commit PENDING to SQLite, *then* call the local turnstile |
 | `GET /api/dev/kiosk/queue` | **DEV-ONLY** counts + recent rows read from SQLite |
 | `POST /api/dev/kiosk/sync/run` | **DEV-ONLY** one sync pass now (a scheduler also runs every 5 s) |
+| `POST /api/dev/kiosk/whitelist/sync` | **DEV-ONLY** H2 manual whitelist trigger; existing feature/offline/revision/concurrency guards apply |
 | `PUT /api/dev/kiosk/sync/offline` `{"disabled":true}` | **DEV-ONLY** stops **only** kiosk → central sync (D05); the turnstile keeps working |
 | `GET /actuator/health` | UP only if the SQLite file opens, the queue table is readable and `journal_mode = wal` (`sqliteQueue` component) |
 
 ## What the slice guarantees
 - **Order (ADR-01):** the event is committed to SQLite as `PENDING` *before* the open command is sent; a test proves the row is visible from a fresh connection at the moment the turnstile is called.
+- **Local QR verification (ADR-02):** check the active cached employee and version, accept either of the last two adjacent 30-second steps (current and previous), and use `(employee_id, matched_time_step)` as the on-disk replay key. The dev kiosk persists business rejections in the local SQLite audit table. Retention and Central replication remain open under D06.
 - **Sync status ≠ gate status.** `sync_status` (`PENDING|SYNCED|FAILED`) is central synchronisation only; `gate_command_status` (`SENT|FAILED|…`) is whether the command was accepted. `SENT` against the mock proves nothing physical.
 - **SYNCED only after an ack naming the id.** Unacknowledged ids stay `PENDING` with exponential backoff; a whole-request failure (refused, timeout, 4xx, 5xx) is never a rejection — only a per-event `REJECTED_PERMANENT` makes a row `FAILED` (DECISIONS B07).
 - **Durability scope:** WAL + `synchronous=FULL` cover a process crash or restart, not a disk failure ([limitations](../docs/DECISIONS.md#known-limitations)). Use the named volume, not a Windows bind mount (B17).
@@ -97,12 +101,13 @@ one shared `SyncWhitelistUseCase` using the existing store/switch/identity/Clock
 explicit replacement bean exists. The composition root imports the HTTP configuration; use-case construction resolves
 the source normally, without a registration-order-dependent `@ConditionalOnBean` check.
 
-Opt-in now starts a delayed periodic trigger, described below. There is **no immediate startup fetch or new public
-endpoint**. Explicit test/Java callers may still obtain the shared use-case bean and call `run()`; do not construct
+Opt-in starts the periodic trigger below; dev additionally queues one pass after ApplicationReady (H3).
+Explicit test/Java callers and H2's dev-only endpoint use the shared use-case bean; do not construct
 another instance. `/api/dev/kiosk/sync/run` remains Attendance-only. Missing API keys or a headerless Central do not
 prevent startup: scheduled/explicit runs return the existing safe failure reports and keep the old cache. Offline remains
 controlled by `CentralSyncSwitch`; enabling the feature does not override it. `.env.example` and Compose forward
-the flag with a false default; `KIOSK_API_KEY` and `KIOSK_WHITELIST_KEY_BASE64` retain separate roles.
+the flag with a false standalone default; dev Compose overrides it to true. `KIOSK_API_KEY` and
+`KIOSK_WHITELIST_KEY_BASE64` retain separate roles.
 
 `WhitelistEmployeeMapperTest` checks UTF-8, supported statuses, invalid data, defensive copies and safe diagnostics. `WhitelistSyncWiringConfigTest` supplies explicit test-only revision-bearing fixtures to verify singleton sharing/backoff, existing Clock/identity/store reuse and the shared offline switch. Fixture commits use a temporary SQLite database; no HTTP array is assigned a fabricated revision or written to a real kiosk cache.
 
@@ -143,10 +148,11 @@ source or use-case bean and makes no scheduled whitelist request. `KIOSK_WHITELI
 An invalid interval fails enabled startup; the disabled feature ignores its unused interval. Restart to change these
 deployment settings. This interval is a scheduling delay, not a cache TTL or a rotation policy.
 
-`WhitelistSyncScheduler` starts through Spring `SmartLifecycle` after bean initialization. The first pass waits
-one full interval; each later pass waits the same delay after the previous pass finishes. Its single daemon worker,
+Outside dev, `WhitelistSyncScheduler` starts through Spring `SmartLifecycle` after bean initialization and waits
+one full interval. In dev it waits for ApplicationReady, then starts the same worker and queues an initial pass.
+Periodic passes use fixed delay after the previous periodic pass finishes. Its single daemon worker,
 `tmc-whitelist-sync`, is private, not a Spring TaskScheduler/ScheduledExecutorService bean, so it cannot become
-Attendance's default scheduler or occupy that scheduler's thread. No new endpoint or eager startup request is added.
+Attendance's default scheduler or occupy that scheduler's thread. No HTTP runs in constructors or on the ready-event thread.
 
 Every pass calls only the existing singleton use case. Offline skips HTTP; its existing non-reentrant guard also
 arbitrates explicit concurrent calls. Scheduler lifecycle synchronization protects start/stop only, not the sync
@@ -163,7 +169,69 @@ Tests cover lifecycle/timing, invalid/default configuration, offline and singlet
 HTTP-mock 503 → next-cycle encrypted SQLite commit. Central's actual monotonic revision/consistent factory snapshot
 and production factory authorization still need verification; enabling the flag does not establish either.
 
+## Manual whitelist sync (H2)
+
+With profile `dev`, `/demo` can POST `/api/dev/kiosk/whitelist/sync` with no body through the existing gateway
+kiosk prefix. The controller calls the same singleton `SyncWhitelistUseCase.run()` as the scheduler;
+it never fetches HTTP, encrypts material or writes SQLite itself. Only `UPDATED` / `NOT_NEWER` return 200
+`{"status":"UPDATED","snapshotVersion":7}` (or `NOT_NEWER`). The latter reports the candidate revision,
+which can be below the stored version. A successful update is reported only after commit.
+
+Flag false returns 503 `WHITELIST_SYNC_DISABLED`; missing use case returns 503 `WHITELIST_SYNC_UNAVAILABLE`.
+Offline returns 409 `CENTRAL_SYNC_DISABLED`; an active pass returns 409 `WHITELIST_SYNC_IN_PROGRESS`.
+Invalid source data returns 502; unavailable source/cache or invalid cache returns 503; unexpected failure
+returns a fixed 500. Full error codes: [API contract](../docs/API-CONTRACTS.md#h1-and-h2-dev-demo-routes-2026-11-17).
+Errors never echo sensitive diagnostics. Responses carry no employees or secrets and use no-store.
+
+This endpoint is unauthenticated and absent outside `dev`; keep it on a trusted synthetic-data machine.
+The existing flag remains **false by default**. Enabling it still requires a matching dev `KIOSK_API_KEY`,
+an externally provisioned `KIOSK_WHITELIST_KEY_BASE64`, configured identity and a revision-capable Central.
+H2 itself does not change startup behavior; H3/H4 below add the separate dev-ready trigger and key provisioning.
+Real-stack/browser acceptance has not been rerun; [current evidence](../docs/STATUS.md#20-h1h2-demo-endpoints-2026-11-17).
+
+## Dev initial sync and key provisioning (H3/H4)
+
+Run from the repository root on Windows:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/provision-kiosk-key.ps1
+docker compose config --quiet
+# Start/rebuild the existing dev stack when ready; no volume reset is required for H3/H4.
+docker compose up --build -d --wait
+```
+
+The script creates `.env` from `.env.example` only when absent. It fills a missing/blank
+`KIOSK_WHITELIST_KEY_BASE64` with 32 CSPRNG bytes, encoded as standard Base64. An existing valid key leaves
+the file unchanged; invalid/duplicate values fail without replacement or value disclosure. Quoted values are
+supported. A file lock prevents competing provisions; replacement is atomic and creates no secret backup.
+Only a file named `.env` can be targeted (`-EnvFile` supports an isolated dev directory).
+The generated `.env` and temporary/test keys are Git-ignored; never commit, print, share or regenerate a key
+for an existing encrypted cache. Preserve the same key externally across restarts. Environment variables
+override `.env` in Compose: remove conflicting shell overrides rather than accidentally changing the key.
+
+This repository's Compose is dev-only and sets sync enabled explicitly, even if `.env` retains the standalone
+false default. Missing/blank keys fail Compose interpolation with a provisioning hint. A malformed nonblank key
+is rejected by the unchanged codec at startup; run the provisioning script to validate first. Standalone/test
+defaults and the queue-only missing-key behavior are unchanged. No production key management is claimed.
+Use `docker compose config --quiet`; the non-quiet form renders credentials.
+
+With dev + flag true, the scheduler does not auto-start during context refresh. The dev-only
+`ApplicationReadyEvent` listener starts it and queues exactly one initial pass on its existing private worker,
+without waiting 60 seconds. Repeated ready notifications do not enqueue another initial pass. There is no
+initial listener in other profiles or with the flag off. Scheduler/manual calls share the original singleton
+guard; no extra sync lock, HTTP/store code or secret format is introduced. A failed/offline initial attempt
+does not block readiness, clear the old cache or kill later fixed-delay retries (default 60000 ms).
+
+Compose still lets the Kiosk boot before the gateway/Central. Therefore the initial attempt may fail during
+normal whole-stack startup; the next interval or H2's manual button retries. Health/readiness does not promise
+a populated whitelist. Real gateway/browser acceptance remains for Nam; [evidence](../docs/STATUS.md#21-h3h4-dev-whitelist-startup-and-key-provisioning-2026-11-17).
+
+Focused script checks: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-provision-kiosk-key.ps1`.
+These generate random test keys only under ignored `kiosk-agent/target/` and print counts, never key values.
+
 ## Handoff: QR scan for Khánh (2026-11-16)
+
+Historical implementation brief. Current behavior is described above and in API-CONTRACTS §3.
 
 Written by Nam from the merged `develop` (`d486668`) so the scan can be built tonight without re-reading every branch. It describes what exists and what the other modules expect; the design choices marked **proposal** are yours to change (tell Khiêm if the wire shape changes, and record contract changes with the `record-decision` skill).
 
@@ -212,7 +280,7 @@ Rejected scans (D06, open, decide with Khôi): `local_attendance_events.scan_res
 ### Dependency status (updated 2026-11-17, after Khoa's commit `94e450f`)
 
 - **Ready on `develop`: User/QR side (DECISIONS B27).** `GET /api/v1/kiosk/whitelist?factoryId=BD` sends `X-Whitelist-Version` (per-factory revision, starts at 1), and `GET /api/v1/qr/{id}` returns `periodSeconds: 30` and `qrPayload {empId, totp, ts, ver}`. `ts` is `issuedAt` in epoch **seconds**, not the time step: find the matching step from the TOTP (current + previous) and never trust `ts` alone. `ver` is the employee's `secretVersion`, so compare it with the cached `secretVersion` before checking the TOTP. A revoked QR answers `409 QR_REVOKED`. The schema changed, so run `docker compose down -v` once before `up`.
-- **Not ready yet: whitelist in the running stack (Khôi, TODO §3).** The kiosk only fetches the whitelist when `KIOSK_WHITELIST_SYNC_ENABLED=true` (default `false` in Compose) and `KIOSK_WHITELIST_KEY_BASE64` is set (empty by default). The first fetch also waits one full interval. `KIOSK_API_KEY` is now the same in both services. To try it locally, export those two variables with a throwaway 32-byte key. For unit tests, seed the cache through `IWhitelistSnapshotStore.replaceIfNewer(...)` with a generated AES key, as `SyncWhitelistUseCaseTest` and `SQLiteWhitelistRepositoryTest` do.
+- **Whitelist dev setup (Khôi, H3/H4).** Dev Compose now enables sync and requires a provisioned local AES key; [setup](#dev-initial-sync-and-key-provisioning-h3h4). The first attempt is queued after Ready; Central/gateway may still be starting, so fixed-delay/manual retry remains necessary. `KIOSK_API_KEY` is the same in both services. For scan unit tests, seed isolated caches through `IWhitelistSnapshotStore.replaceIfNewer(...)` with generated test keys; do not use or rotate a teammate's existing cache key. Real running-stack/browser acceptance has not been rerun here.
 
 ### Things that must change together when the route stops answering 501
 

@@ -10,10 +10,28 @@ Central, idempotent, ACID ingestion of attendance events (ADR-01). The **ingesti
 | `POST /api/dev/attendance/events` | **DEV-ONLY**, unauthenticated, `dev` profile only. One event, ack after commit |
 | `POST /api/dev/attendance/sync` | **DEV-ONLY**. Batch with a per-event ack: `STORED` / `ALREADY_EXISTS` / `RETRYABLE` / `REJECTED_PERMANENT` |
 | `GET /api/dev/attendance/events/{id}` | **DEV-ONLY** read-back |
+| `GET /api/v1/attendance/events?limit=20&employeeId=EMP001` | **DEV-ONLY** H1 list for `/demo`; fixtures included, newest first |
 | `GET /api/dev/attendance/history` | **DEV-ONLY**, unauthenticated history query; see below |
 | `GET /actuator/health` | ready only while PostgreSQL answers (`db` component) |
 
 Rows written through the dev routes have `dev_fixture = true` so reports can exclude them.
+
+## Demo Central list (H1)
+
+Only profile `dev` registers this GET, despite its `/api/v1` path. The existing gateway attendance prefix
+already routes it to this service. `limit` defaults to 20, must be an integer in 1..100; optional `employeeId`
+is stripped, nonblank, at most 32 characters and free of control characters. Invalid input returns 400;
+database failure returns 503, never a successful empty list.
+
+```powershell
+Invoke-RestMethod 'http://localhost:8080/api/v1/attendance/events?limit=20&employeeId=EMP001'
+```
+
+Response: `{"events":[...]}` with the seven `CentralEvent` fields consumed by `/demo`:
+`attendanceId`, `employeeId`, `factoryId`, `gateId`, `direction`, `occurredAt`, `scanResult`.
+Rows include `dev_fixture=true`, ALLOWED and REJECTED, across factories; filter precedes limit and order is
+`occurredAt DESC, attendanceId DESC`. This is a bounded demo inspection list, not authorized employee history.
+The unchanged History endpoint below still excludes fixtures. No production POST route is opened.
 
 ## Dev attendance history
 
@@ -71,6 +89,8 @@ Invoke-RestMethod -Method Post -Uri "$attendanceBase/api/dev/attendance/sync" -C
 
 $historyUri = "$attendanceBase/api/dev/attendance/history?employeeId=EMP001&factoryId=BD&fromInclusive=2026-11-14T01:00:00Z&toExclusive=2026-11-14T02:00:00Z&page=0&size=20"
 Invoke-RestMethod -Uri $historyUri
+# The same synthetic events ARE visible in H1's Central list, unlike History.
+Invoke-RestMethod -Uri "$attendanceBase/api/v1/attendance/events?limit=20&employeeId=EMP001"
 ```
 
 The first POST should return `STORED`, `duplicate=false`. The example batch then returns `ALREADY_EXISTS`
@@ -101,5 +121,6 @@ is absent. Khoa owns auth integration and Khánh reviews event/ACK compatibility
 `mvn test` runs unit tests (fake repository), WebMvc validation/profile tests, ArchUnit layering and the history/idempotency PostgreSQL integration suites. Testcontainers starts **real PostgreSQL 16** and loads the canonical `init-db/schema.sql`; the history suite also exercises HTTP → service → PostgreSQL. These suites are **skipped, not faked, without Docker** — check the surefire "Skipped" count.
 
 From the repository root: `mvn -B -ntp -pl backend-services/attendance-processor test`.
-Latest measured module result, PostgreSQL details and earlier skipped runs: [STATUS §13](../../docs/STATUS.md#13-attendance-processor-postgresql-recheck-2026-11-14).
-This handoff adds documentation only; the examples above were not rerun through a deployed gateway in this documentation pass.
+Latest H1/H2 verification and environment limits: [STATUS §20](../../docs/STATUS.md#20-h1h2-demo-endpoints-2026-11-17).
+Historical full PostgreSQL evidence remains in §13 and §19; it does not verify the new H1 SQL tests.
+The examples above were not rerun through a deployed gateway during the H1/H2 change.

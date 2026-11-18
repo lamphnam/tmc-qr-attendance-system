@@ -1,8 +1,8 @@
-# TMC QR Attendance & Access Control — M2 codebase (bootstrap)
+# TMC QR Attendance & Access Control — M2 codebase
 
 Môn **CO3017 Software Architecture — Assignment M2**. Kiến trúc lai **Service-based + Offline-First Kiosk** kế thừa M1: 4 service Spring Boot dùng chung 1 PostgreSQL, 1 kiosk-agent với SQLite WAL, đồng bộ HTTP REST trực tiếp, **không** message broker ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 
-> **Đây là code M2 đang phát triển, chưa phải sản phẩm hoàn tất.** User/QR đã có TOTP, vòng đời QR, whitelist và audit chain trong profile dev; chưa có đăng nhập/RBAC, quét QR tại kiosk, báo cáo hay xuất HR. Trạng thái và kết quả kiểm chứng: [docs/STATUS.md](docs/STATUS.md). Việc còn lại: [docs/TODO.md](docs/TODO.md). Stack là **dev-only**, dùng dữ liệu/khóa giả và mô phỏng edge + central trên một máy; giới hạn bảo mật và vận hành: [docs/DECISIONS.md](docs/DECISIONS.md#known-limitations).
+> **M2 dev slice.** Stack có QR động, whitelist, kiosk scan/offline sync, báo cáo và HR export qua dev routes. Login/RBAC, cổng vật lý và các tính năng production còn nằm trong phạm vi thiết kế. Xem [kết quả kiểm chứng](docs/STATUS.md), [mục chờ review](docs/TODO.md) và [giới hạn](docs/DECISIONS.md#known-limitations).
 
 ## 1. Yêu cầu
 
@@ -17,12 +17,25 @@ Môn **CO3017 Software Architecture — Assignment M2**. Kiến trúc lai **Serv
 ## 2. Chạy nhanh
 
 ```bash
-cp .env.example .env                       # PowerShell: Copy-Item .env.example .env   (không bắt buộc: compose có sẵn giá trị mặc định giống hệt)
+docker info --format '{{.ServerVersion}}'  # cần Docker Engine trả lời
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/provision-kiosk-key.ps1  # tạo .env/key dev, hoặc tái sử dụng key hợp lệ
+docker compose config --quiet
 docker compose up --build -d --wait        # build 10 container; lần đầu mất vài phút (Maven tải dependency)
 bash scripts/smoke.sh                      # Windows PowerShell: powershell -ExecutionPolicy Bypass -File scripts\smoke.ps1
 ```
 
 Mở **http://localhost:8080** (qua gateway). Trang *Status* hiển thị health thật của từng service; trang *Dev slice* điều khiển luồng kiosk → central. `make up`, `make smoke`... là lối tắt tương đương (cần GNU make; `make help`).
+
+Để nghiệm thu, mở **`/demo`** sau khi `/gateway/health` trả 200. Chọn nhân viên BD, đồng bộ whitelist
+và quét mã hiện tại. Sau khi mở khóa QR, đồng bộ whitelist để kiosk nhận revision mới.
+Nếu đổi cổng host, chạy smoke và integration từ shell đã đặt đúng các biến `*_HOST_PORT`.
+Trên Windows dùng `smoke.ps1` hoặc Git Bash để dùng cùng loopback như trình duyệt host.
+
+Compose này chỉ dùng cho dev: bật Whitelist Sync và yêu cầu AES key local; `application.yml` và `.env.example`
+vẫn mặc định false. Initial sync chạy sau ApplicationReady; nếu gateway/Central chưa sẵn sàng, Kiosk vẫn boot
+và retry định kỳ. Script không in key, không xoay key hợp lệ; giữ `.env` để đọc lại SQLite sau restart.
+`-ExecutionPolicy Bypass` chỉ áp dụng cho tiến trình PowerShell đó, không đổi policy hệ thống.
+Chi tiết: [Kiosk H3/H4](kiosk-agent/README.md#dev-initial-sync-and-key-provisioning-h3h4).
 
 ## 3. Cổng
 
@@ -48,6 +61,7 @@ mvn -B test                                                   # 5 module Java (J
 (cd mock-external-systems/mock-turnstile-api && npm test)
 (cd mock-external-systems/mock-hr-payroll-api && npm test)
 docker compose config --quiet
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-provision-kiosk-key.ps1
 bash scripts/smoke.sh                                         # cần stack đang chạy
 node --test tests/integration/slice.test.mjs                  # cần stack đang chạy; SKIP_DISRUPTIVE=1 để bỏ test dừng/restart container
 node --test tests/integration/user-qr.test.mjs                # QR lifecycle, whitelist và checksum; schema/seed mới

@@ -27,4 +27,8 @@ public class ExportSchedule {
     public ExportPeriod periodDueAt(Instant now) {
         return ExportPeriod.monthContaining(now.minus(runAtOffset)).previous();
     }
+
+    public Instant scheduledAt(ExportPeriod period) {
+        return period.endExclusive().plus(runAtOffset);
+    }
 }

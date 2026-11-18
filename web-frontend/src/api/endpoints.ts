@@ -16,6 +16,7 @@ export const PATHS = {
   qr: (empId: string) => `/api/v1/qr/${enc(empId)}`,
   qrRotate: (empId: string) => `/api/v1/qr/${enc(empId)}/rotate`,
   qrRevoke: (empId: string) => `/api/v1/qr/${enc(empId)}/revoke`,
+  qrActivate: (empId: string) => `/api/v1/qr/${enc(empId)}/activate`,
   scan: '/api/local/scan',
   kioskQueue: (limit: number) => `/api/dev/kiosk/queue?limit=${limit}`,
   kioskSyncState: '/api/dev/kiosk/sync/state',
@@ -34,6 +35,8 @@ export const getQr = (empId: string, f?: F) => apiFetch<unknown>(PATHS.qr(empId)
 export const rotateQr = (empId: string, f?: F) => apiFetch<unknown>(PATHS.qrRotate(empId), { method: 'POST', body: {} }, f);
 export const revokeQr = (empId: string, reason: string, f?: F) =>
   apiFetch<unknown>(PATHS.qrRevoke(empId), { method: 'POST', body: { reason } }, f);
+export const activateQr = (empId: string, f?: F) =>
+  apiFetch<unknown>(PATHS.qrActivate(empId), { method: 'POST', body: {} }, f);
 export const scan = (body: ScanRequest, f?: F) => apiFetch<unknown>(PATHS.scan, { method: 'POST', body }, f);
 export const getQueue = (limit: number, f?: F): Promise<ApiResult<QueueSnapshot>> =>
   apiFetch<QueueSnapshot>(PATHS.kioskQueue(limit), {}, f);

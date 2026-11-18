@@ -46,6 +46,11 @@ function stage(name, { stack = false, body }) {
   if (!wanted(name)) return;
   if (stack && FAST) return record(name, 'SKIPPED', '--fast');
   if (name === 'integration' && args.has('--no-integration')) return record(name, 'SKIPPED', '--no-integration');
+  if (stack) {
+    const prerequisite = results.find((result) =>
+      ['compose-config', 'stack-up'].includes(result.stage) && result.state === 'FAIL');
+    if (prerequisite) return record(name, 'SKIPPED', `${prerequisite.stage} failed`);
+  }
   body(name);
 }
 
@@ -150,7 +155,17 @@ stage('smoke', {
 
 stage('integration', {
   stack: true,
-  body: (name) => simple(name, process.execPath, ['--test', '--test-concurrency=1', 'tests/integration/slice.test.mjs', 'tests/integration/user-qr.test.mjs', 'tests/integration/reporting.test.mjs'], {}, (o) => `${/ℹ pass (\d+)/.exec(o)?.[1] ?? '?'} of ${/ℹ tests (\d+)/.exec(o)?.[1] ?? '?'} passed`),
+  body: (name) => {
+    const r = run(process.execPath, ['--test', '--test-reporter=tap', '--test-concurrency=1',
+      'tests/integration/slice.test.mjs', 'tests/integration/user-qr.test.mjs',
+      'tests/integration/reporting.test.mjs', 'tests/integration/main-flow.test.mjs']);
+    const total = /^# tests (\d+)\s*$/m.exec(r.output)?.[1];
+    const passed = /^# pass (\d+)\s*$/m.exec(r.output)?.[1];
+    const skipped = /^# skipped (\d+)\s*$/m.exec(r.output)?.[1];
+    const state = r.status !== 0 ? 'FAIL' : total && passed === total && skipped === '0' && total !== '0' ? 'PASS' : 'WARN';
+    record(name, state, `exit ${r.status}; ${passed ?? '?'} of ${total ?? '?'} passed, ${skipped ?? '?'} skipped`,
+      r.seconds, r.output);
+  },
 });
 
 if (args.has('--down') && !FAST) {
@@ -164,5 +179,8 @@ for (const r of results) console.log(`| ${r.stage} | ${r.state} | ${r.detail} |`
 const failed = results.filter((r) => r.state === 'FAIL');
 const notRun = results.filter((r) => r.state === 'SKIPPED' || r.state === 'WARN');
 const partial = only ? ` — PARTIAL RUN (--only ${only.join(',')}): stages not listed were not run` : '';
-console.log(`\n${failed.length === 0 ? 'ALL RUN STAGES PASSED' : `${failed.length} STAGE(S) FAILED`}${notRun.length ? ` — ${notRun.length} stage(s) skipped or with skipped tests: this is NOT a full pass` : ''}${partial}`);
+const summary = failed.length > 0
+  ? `${failed.length} STAGE(S) FAILED`
+  : notRun.length > 0 ? 'COMPLETED WITH SKIPS OR WARNINGS' : 'ALL RUN STAGES PASSED';
+console.log(`\n${summary}${notRun.length ? ` — ${notRun.length} stage(s) skipped or with skipped tests` : ''}${partial}`);
 process.exit(failed.length === 0 ? 0 : 1);

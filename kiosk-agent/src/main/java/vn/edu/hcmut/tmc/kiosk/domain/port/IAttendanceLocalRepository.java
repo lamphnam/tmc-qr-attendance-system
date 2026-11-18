@@ -8,6 +8,7 @@ import java.util.UUID;
 import vn.edu.hcmut.tmc.kiosk.domain.model.GateCommandStatus;
 import vn.edu.hcmut.tmc.kiosk.domain.model.LocalAttendanceEvent;
 import vn.edu.hcmut.tmc.kiosk.domain.model.QueueCounts;
+import vn.edu.hcmut.tmc.kiosk.domain.model.RejectedScan;
 
 /** Durable local queue port. The SQLite implementation lives in infrastructure. */
 public interface IAttendanceLocalRepository {
@@ -17,6 +18,16 @@ public interface IAttendanceLocalRepository {
      * the caller send the open-gate command (ADR-01).
      */
     void insertPending(LocalAttendanceEvent event);
+
+    /**
+     * Commits an allowed PENDING event and consumes its employee/step in one transaction.
+     * Requires a new event ID and a verified step. Returns false on replay, with neither row changed.
+     * On storage failure the write must fail without authorizing a gate command.
+     */
+    boolean insertPendingWithToken(LocalAttendanceEvent event, long matchedTimeStep);
+
+    /** Durably records a rejection locally. This must never enqueue an attendance event or consume a token. */
+    void insertRejectedScan(RejectedScan scan);
 
     void updateGateCommandStatus(UUID attendanceId, GateCommandStatus status, String detail);
 

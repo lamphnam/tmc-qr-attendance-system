@@ -7,6 +7,7 @@ queue, commands counted by the mock turnstile), never on "HTTP 200" alone.
 docker compose up --build -d --wait
 node --test tests/integration/slice.test.mjs          # Node >= 20, no npm install needed
 node --test tests/integration/reporting.test.mjs      # reporting-service + the real mock HR
+node --test tests/integration/main-flow.test.mjs      # real QR scans against the dev stack
 SKIP_DISRUPTIVE=1 node --test tests/integration/slice.test.mjs
 ```
 
@@ -21,9 +22,15 @@ SKIP_DISRUPTIVE=1 node --test tests/integration/slice.test.mjs
 | `reporting.test.mjs`: manual export of an unused past month | no | batch id equals `nameUUIDFromBytes("tmc-hr-export:YYYY-MM")` recomputed in Node; only ALLOWED rows frozen (`psql`); the real mock HR received it once; a second trigger is 409 |
 | `reporting.test.mjs`: HR returns 503, then recovers | no (toggles mock HR failure injection, always reset) | 202 + persisted retry, nothing stored at HR; the retry reuses the same batch and HR counts it once |
 | `reporting.test.mjs`: dashboard through the gateway | no | the dev route reaches PostgreSQL and shows the latest batch |
+| `main-flow.test.mjs`: QR → gate command → ack → demo events and report | no | User/QR wire payload, SQLite queue, one gate command, one PostgreSQL row, deployed read routes |
+| `main-flow.test.mjs`: replay, rejected QR, offline reconnect and central resend | no | denied QR creates no event or command; accepted offline event syncs once and a retry returns `ALREADY_EXISTS` |
+| `main-flow.test.mjs`: 20 scans offline + restart | **yes** (stops `attendance-processor`, restarts `kiosk-agent`) | SQLite preserves all 20 IDs, including a case precommitted in central without a kiosk ack; all IDs sync without duplicates |
 
-Scope warning: events are **synthetic** (no QR, no TOTP, no authentication). Passing this suite does **not** demonstrate
-NFR-1/2/3/6, ADR-02 or ADR-03. Owners add their real tests next to this file.
+`slice.test.mjs` uses synthetic events that bypass QR verification. The main-flow tests generate valid QR codes for
+isolated synthetic employees. They require a provisioned kiosk whitelist key and the dev Compose reporting setting
+`REPORTING_INCLUDE_DEV_FIXTURES=true`, since central's dev ingestion marks all records as fixtures. Run the files
+serially as in `scripts/verify.mjs` because they share services and runtime switches. `SKIP_DISRUPTIVE=1` skips the
+20-scan restart case.
 
 Environment overrides: `GATEWAY_URL`, `MOCK_TURNSTILE_URL`, `MOCK_HR_URL`, `POSTGRES_USER`, `POSTGRES_DB`.
 
