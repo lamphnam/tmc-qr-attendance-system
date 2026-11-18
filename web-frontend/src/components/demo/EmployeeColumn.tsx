@@ -5,7 +5,7 @@ import { secondsLeft, type QrCode, type QrState } from '../../demo/qr';
 import ApiErrorNotice from './ApiErrorNotice';
 
 export interface ActionState {
-  busy: 'rotate' | 'revoke' | null;
+  busy: 'rotate' | 'revoke' | 'activate' | null;
   message: string | null;
   error: ApiError | null;
 }
@@ -21,6 +21,8 @@ export interface EmployeeColumnProps {
   action: ActionState;
   onRotate: () => void;
   onRevoke: () => void;
+  onActivate: () => void;
+  onScanRevoked?: () => void;
 }
 
 function CodeView({ code, nowMs }: { code: QrCode; nowMs: number }) {
@@ -114,6 +116,7 @@ export default function EmployeeColumn(props: EmployeeColumnProps) {
           id="demo-emp"
           className="tmc-select"
           value={selectedId}
+          disabled={action.busy !== null}
           onChange={(e) => onSelect(e.target.value)}
         >
           {employees.map((e) => (
@@ -141,6 +144,17 @@ export default function EmployeeColumn(props: EmployeeColumnProps) {
         >
           {action.busy === 'revoke' ? 'Đang khóa…' : 'Khóa QR nhân viên nghỉ việc (HR)'}
         </button>
+        {props.qr.phase === 'locked' && (
+          <button type="button" className="tmc-btn tmc-btn-secondary" disabled={action.busy !== null}
+            onClick={props.onActivate}>
+            {action.busy === 'activate' ? 'Đang mở khóa…' : 'Mở khóa QR'}
+          </button>
+        )}
+        {props.onScanRevoked && (
+          <button type="button" className="tmc-btn tmc-btn-secondary" onClick={props.onScanRevoked}>
+            Thử quét mã trước khi khóa
+          </button>
+        )}
       </div>
       {action.message && (
         <p className="tmc-small" role="status">

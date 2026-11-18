@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getCentralEvent, getQr, getQueue, revokeQr, rotateQr, runSync, scan, setOffline } from './endpoints';
+import { activateQr, getCentralEvent, getQr, getQueue, revokeQr, rotateQr, runSync, scan, setOffline } from './endpoints';
 
 interface Call {
   url: string;
@@ -23,13 +23,15 @@ describe('endpoints', () => {
     expect(calls[0].init?.method).toBe('GET');
   });
 
-  it('rotate and revoke are POSTs, and revoke sends its reason', async () => {
+  it('rotate, revoke and activate use the QR lifecycle POST routes', async () => {
     const { impl, calls } = recorder();
     await rotateQr('EMP001', impl);
     await revokeQr('EMP001', 'left the company', impl);
+    await activateQr('EMP001', impl);
     expect(calls.map((c) => [c.init?.method, c.url])).toEqual([
       ['POST', '/api/v1/qr/EMP001/rotate'],
       ['POST', '/api/v1/qr/EMP001/revoke'],
+      ['POST', '/api/v1/qr/EMP001/activate'],
     ]);
     expect(JSON.parse(String(calls[1].init?.body))).toEqual({ reason: 'left the company' });
   });

@@ -30,6 +30,7 @@ const employee = (overrides: Partial<EmployeeColumnProps> = {}) =>
       action={{ busy: null, message: null, error: null }}
       onRotate={noop}
       onRevoke={noop}
+      onActivate={noop}
       {...overrides}
     />,
   );
@@ -143,7 +144,11 @@ describe('EmployeeColumn', () => {
   });
 
   it('locked: tells the employee to contact HR', () => {
-    expect(employee({ qr: { phase: 'locked', error: http(409, 'QR_REVOKED') } })).toContain('đã bị khóa');
+    const html = employee({ qr: { phase: 'locked', error: http(409, 'QR_REVOKED') }, onScanRevoked: noop });
+    expect(html).toContain('đã bị khóa');
+    expect(html).toContain('Mở khóa QR');
+    expect(html).toContain('Thử quét mã trước khi khóa');
+    expect(html).not.toContain('tmc-qrplate');
   });
 
   it('error: a missing QR route is named as such, with a retry button', () => {
@@ -155,7 +160,7 @@ describe('EmployeeColumn', () => {
   it('busy rotate: labels the button and disables both actions', () => {
     const html = employee({ action: { busy: 'rotate', message: null, error: null } });
     expect(html).toContain('Đang đổi khóa…');
-    expect(html.match(/disabled=""/g)?.length).toBe(2);
+    expect(html.match(/disabled=""/g)?.length).toBe(3);
   });
 });
 

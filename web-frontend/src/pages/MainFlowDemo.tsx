@@ -16,7 +16,7 @@ import {
 } from '../demo/central';
 import { DEMO_EMPLOYEES, DEMO_GATES, KIOSK_ID } from '../demo/config';
 import { formatSyncReport } from '../demo/kiosk';
-import { needsRefresh, onFetched, onTick, secondsLeft, type QrState } from '../demo/qr';
+import { needsRefresh, onFetched, onTick, secondsLeft, type QrCode, type QrState } from '../demo/qr';
 import { describeScan, describeScanError, parseScanResponse, type ScanView } from '../demo/scan';
 import { usePolling } from '../demo/usePolling';
 
@@ -32,6 +32,7 @@ export default function MainFlowDemo() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [qrFetching, setQrFetching] = useState(false);
   const [action, setAction] = useState<ActionState>(IDLE_ACTION);
+  const [revokedCode, setRevokedCode] = useState<QrCode | null>(null);
   const qrSeq = useRef(0);
   const lastQrAttempt = useRef(0);
 
@@ -48,6 +49,7 @@ export default function MainFlowDemo() {
   useEffect(() => {
     setQr({ phase: 'loading' });
     setAction(IDLE_ACTION);
+    setRevokedCode(null);
     void loadQr(employeeId);
   }, [employeeId, loadQr]);
 
@@ -72,24 +74,34 @@ export default function MainFlowDemo() {
     if (!qrFetching && needsRefresh(qr, nowMs, lastQrAttempt.current)) void loadQr(employeeId);
   }, [qr, nowMs, qrFetching, employeeId, loadQr]);
 
-  const runAction = async (kind: 'rotate' | 'revoke') => {
-    if (kind === 'revoke' && !window.confirm(`Khóa QR của ${employeeId}? Trang demo không có nút mở khóa.`)) return;
+  useEffect(() => {
+    if (revokedCode && nowMs >= revokedCode.expiresAtMs + revokedCode.periodSeconds * 1000) setRevokedCode(null);
+  }, [revokedCode, nowMs]);
+
+  const runAction = async (kind: NonNullable<ActionState['busy']>) => {
+    if (kind === 'revoke' && !window.confirm(`Khóa QR của ${employeeId}?`)) return;
+    const previous = kind === 'revoke' ? liveCode : null;
     setAction({ busy: kind, message: null, error: null });
-    const r =
-      kind === 'rotate'
-        ? await api.rotateQr(employeeId)
-        : await api.revokeQr(employeeId, 'Demo M2: nhân viên nghỉ việc (FR-1.4)');
+    const actions = {
+      rotate: () => api.rotateQr(employeeId),
+      revoke: () => api.revokeQr(employeeId, 'Demo M2: nhân viên nghỉ việc (FR-1.4)'),
+      activate: () => api.activateQr(employeeId),
+    };
+    const r = await actions[kind]();
     if (!r.ok) {
       setAction({ busy: null, message: null, error: r.error });
       return;
     }
+    setRevokedCode(previous);
+    const messages = {
+      rotate: 'Đã đổi khóa bí mật. Kiosk ngừng chấp nhận mã cũ sau lần đồng bộ whitelist tiếp theo.',
+      revoke: 'Đã khóa QR. Đồng bộ whitelist rồi thử quét mã trước khi khóa.',
+      activate: 'Đã mở khóa QR. Đồng bộ whitelist để kiosk nhận phiên bản mới.',
+    };
     setAction({
       busy: null,
       error: null,
-      message:
-        kind === 'rotate'
-          ? 'Đã đổi khóa bí mật. Kiosk ngừng chấp nhận mã cũ sau lần đồng bộ whitelist tiếp theo.'
-          : 'Đã khóa QR. Kiosk ngừng chấp nhận QR này sau lần đồng bộ whitelist tiếp theo.',
+      message: messages[kind],
     });
     void loadQr(employeeId);
   };
@@ -157,11 +169,11 @@ export default function MainFlowDemo() {
   const liveCode = (qr.phase === 'ready' || qr.phase === 'stale') && secondsLeft(qr.code, nowMs) > 0 ? qr.code : null;
   const selectedGate = DEMO_GATES.find((g) => g.id === gateId) ?? DEMO_GATES[0];
 
-  const scan = async () => {
-    if (liveCode === null) return;
+  const scan = async (code: QrCode | null = liveCode) => {
+    if (code === null || scanning) return;
     setScanning(true);
     const started = performance.now();
-    const r = await api.scan({ gateId: selectedGate.id, direction: selectedGate.direction, qrPayload: liveCode.payload });
+    const r = await api.scan({ gateId: selectedGate.id, direction: selectedGate.direction, qrPayload: code.payload });
     const roundTripMs = Math.round(performance.now() - started);
     setScanning(false);
     setScanView(r.ok ? describeScan(parseScanResponse(r.data), roundTripMs) : describeScanError(r.error, roundTripMs));
@@ -222,6 +234,8 @@ export default function MainFlowDemo() {
             action={action}
             onRotate={() => void runAction('rotate')}
             onRevoke={() => void runAction('revoke')}
+            onActivate={() => void runAction('activate')}
+            onScanRevoked={revokedCode && !scanning ? () => void scan(revokedCode) : undefined}
           />
           <KioskColumn
             gates={DEMO_GATES}
